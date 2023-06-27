@@ -48,7 +48,7 @@ checksum = "2fff2a6927b3bb87f9595d67196a70493f627687a71d87a0d692242c33f58c11"
 
 [[package]]
 name = "cec-dpms"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cec-rs",
  "clap",
@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "cec-rs"
-version = "4.0.0"
+version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "55a1cd0aee5b8e8e0d729d56bbd2722eb7739918c2ce42091f04b3751ca465ed"
+checksum = "307c870249c00cb36672ff53b881f3b34948586575736f374259ea51ee4a1973"
 dependencies = [
  "arrayvec",
  "derive_builder",
@@ -283,9 +283,9 @@ checksum = "06e509672465a0504304aa87f9f176f2b2b716ed8fb105ebe5c02dc6dce96a94"
 
 [[package]]
 name = "libcec-sys"
-version = "3.0.0"
+version = "4.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8c01f29c01700b02aa2e715b2629a7aedcfe9e9af44545d477a23b1190d070b2"
+checksum = "445b427549fb06b22cc6b0db7a2a9acf1fe1da752f19270847bac871dba02a5e"
 dependencies = [
  "cc",
  "cmake",
@@ -344,9 +344,9 @@ checksum = "c69d19a208bba8b94bd27d4b7a06ad153cddc6b88cb2149a668e23ce7bdb67d5"
 
 [[package]]
 name = "pkg-config"
-version = "0.3.24"
+version = "0.3.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58893f751c9b0412871a09abd62ecd2a00298c6c83befa223ef98c52aef40cbe"
+checksum = "26072860ba924cbfa98ea39c8c19b4dd6a4a25423dbdf219c1eca91aa0cf6964"
 
 [[package]]
 name = "proc-macro-error"
