@@ -109,11 +109,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         if usr2.load(Ordering::Relaxed) {
             info!("<b><green>USR2</>: powering <b>OFF</>");
             usr2.store(false, Ordering::Relaxed);
-            if connection.get_active_source() == CecLogicalAddress::Playbackdevice1 {
-                let _ = connection.send_standby_devices(CecLogicalAddress::Tv);
-            } else {
-                info!("<i>reguest ignored</>: we are not an active source");
-            }
+            let pwr_off_result = connection.send_standby_devices(CecLogicalAddress::Tv);
+            info!("<b><red>Result:</> {:?}", pwr_off_result);
         }
         if terminate.load(Ordering::Relaxed) {
             info!("Terminating");
