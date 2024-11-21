@@ -6,12 +6,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time};
 use hostname;
+use truncrate::TruncateToBoundary;
 
 extern crate cec_rs;
 use cec_rs::{
     CecCommand, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec, CecLogMessage,
     CecLogicalAddress,
 };
+
+/// Max allowed number of bytes for CEC `OSD Name` (device name)
+///
+/// `OSD Name`: The device’s name - to be used in On Screen Display
+/// references to it.
+const OSD_NAME_MAXBYTES: usize = 14;
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None)]
@@ -95,7 +102,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("Hostname: <b>{:?}</>", hostname);
     let cfg = CecConnectionCfgBuilder::default()
         .port(device_path)
-        .device_name(hostname.into())
+        .device_name(hostname.truncate_to_byte_offset(OSD_NAME_MAXBYTES).into())
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
         .device_types(CecDeviceTypeVec::new(CecDeviceType::PlaybackDevice))
