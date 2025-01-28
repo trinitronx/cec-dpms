@@ -12,8 +12,8 @@ use arrayvec::ArrayVec;
 use libcec_sys::CEC_INVALID_PHYSICAL_ADDRESS;
 extern crate cec_rs;
 use cec_rs::{
-    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecDeviceType,
-    CecDeviceTypeVec, CecLogMessage, CecLogicalAddress, CecOpcode,
+    CecCommand, CecConnection, CecConnectionCfg, CecConnectionCfgBuilder, CecDatapacket,
+    CecDeviceType, CecDeviceTypeVec, CecLogMessage, CecLogicalAddress, CecOpcode,
 };
 
 #[derive(Parser, Debug)]
@@ -106,11 +106,8 @@ fn on_command_received(command: CecCommand) {
         }
         else {
             debug!("<b><red>Error:</> Could not borrow the connection: {:?}", std::any::type_name_of_val(&connection));
-            // let borrowed_tls_conn = connection.borrow().as_ref();
-            // debug!("<b><red>Error:</> borrowed_tls_conn: {:?}", std::any::type_name_of_val(&borrowed_tls_conn));
 
             debug!("<b><red>Debug:</> RefCell wrapper type: {}", std::any::type_name_of_val(&connection));
-
             // Get the contents of RefCell
             let borrowed = connection.borrow();
             debug!("<b><red>Debug:</> After borrow() is_some()??: {:#?} (type: {})",
@@ -131,8 +128,8 @@ fn on_command_received(command: CecCommand) {
                     debug!("Connection is None!");
                 }
             }
-        }
-    })
+    }
+})
 }
 
 fn on_log_message(log_message: CecLogMessage) {
@@ -198,6 +195,54 @@ fn get_osd_hostname() -> String {
 
 thread_local! {
     static CONNECTION: RefCell<Option<CecConnection>> = RefCell::new(None);
+    static CONNECTION_CONFIG: RefCell<Option<CecConnectionCfg>> = RefCell::new(None);
+}
+
+/// Initializes a `CecConnection` from `CONNECTION_CONFIG` and stores it in
+/// thread-local storage as `CONNECTION`
+///
+/// This function gets the `CecConnectionCfg` from thread-local storage
+/// variable: `CONNECTION_CONFIG`.
+///
+/// ## Example
+///
+/// ```rust
+/// use std::io;
+/// fn main() -> io::Result<()> {
+///   match initialize_connection() {
+///     Some(()) => { Ok(()) }
+///     None => { Err("Could not open CEC connection") }
+///   }
+/// }
+/// ```
+///
+/// ## Errors
+///
+/// None - If an error was encountered opening the CEC connection, then `None`
+///        is returned.
+fn initialize_connection() -> Option<()> {
+    CONNECTION.with(|conn| {
+        // Get mutable access to the thread_local RefCell contents and set it
+        CONNECTION_CONFIG.with(|opt_config| {
+            if let Some(cfg) = opt_config.borrow_mut().take() {
+                match cfg.open() {
+                    Ok(c) => {
+                        info!("Successfully opened CEC connection");
+                        *conn.borrow_mut() = Some(c);
+                        Some(())
+                    }
+                    Err(e) => {
+                        error!("Failed to initialize CEC connection: {:?}", e);
+                        *conn.borrow_mut() = None;
+                        None
+                    }
+                }
+            } else {
+                error!("Failed to get mutable reference to thread-local CecConnectionCfg");
+                None
+            }
+        })
+    })
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -214,42 +259,70 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cfg = CecConnectionCfgBuilder::default()
         .port(device_path)
         .device_name(hostname.into())
-        .activate_source(false)
+        .activate_source(true)
         .base_device(CecLogicalAddress::Unknown)
+        // .base_device(CecLogicalAddress::Tv)
         .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
+        // .physical_address(0x4000)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
         .device_types(CecDeviceTypeVec::new(CecDeviceType::PlaybackDevice))
         .adapter_type(cec_rs::CecAdapterType::P8External)
         .build()
         .unwrap();
-    // let connection = cfg.open().unwrap();
+    CONNECTION_CONFIG.with(|config| {
+        // store it in thread-local RefCell's value
+        *config.borrow_mut() = Some(cfg);
+    });
+    // Setup signal handling flags
+    let usr1 = Arc::new(AtomicBool::new(false));
+    let usr2 = Arc::new(AtomicBool::new(false));
+    let terminate = Arc::new(AtomicBool::new(false));
+    signal_hook::flag::register(SIGUSR1, Arc::clone(&usr1))?;
+    signal_hook::flag::register(SIGUSR2, Arc::clone(&usr2))?;
+    signal_hook::flag::register(SIGTERM, Arc::clone(&terminate))?;
+    signal_hook::flag::register(SIGINT, Arc::clone(&terminate))?;
+
+    // Initialize CecConnection and store it in thread-local CONNECTION
+    initialize_connection();
+
+    // Sharing same CEC connection with callback function threads, so only borrow it when needed
     CONNECTION.with(|conn| {
         // Get mutable access to the thread_local RefCell contents and set it
-        *conn.borrow_mut() = cfg.open().ok();
+        // *conn.borrow_mut() = cfg.open().ok();
         // connection = cfg.open().unwrap();
         if let Some(connection) = conn.borrow().as_ref() {
-            let usr1 = Arc::new(AtomicBool::new(false));
-            let usr2 = Arc::new(AtomicBool::new(false));
-            let terminate = Arc::new(AtomicBool::new(false));
-            signal_hook::flag::register(SIGUSR1, Arc::clone(&usr1))?;
-            signal_hook::flag::register(SIGUSR2, Arc::clone(&usr2))?;
-            signal_hook::flag::register(SIGTERM, Arc::clone(&terminate))?;
-            signal_hook::flag::register(SIGINT, Arc::clone(&terminate))?;
-
+            info!(
+                "Am I active source? <b>{:?}</>",
+                connection.is_active_source(CecLogicalAddress::Playbackdevice1)
+            );
             info!("Active source: <b>{:?}</>", connection.get_active_source());
-            info!("Waiting for signals...");
-            loop {
-                if usr1.load(Ordering::Relaxed) {
-                    info!("<b><green>USR1</>: powering <b>ON</>");
-                    usr1.store(false, Ordering::Relaxed);
-                    // This apparently set active source to Tv??
-                    // let _ = connection.send_power_on_devices(CecLogicalAddress::Tv);
+            Ok(()) as Result<(), Box<dyn Error>>
+        } else {
+            let err_msg = "Failed to open CEC connection";
+            error!("{}", err_msg);
+            Err(err_msg.to_string().into())
+            // Err(Box::new(std::io::Error::new(
+            //     std::io::ErrorKind::Other,
+            //     err_msg,
+            // )))
+        }
+    })?;
+
+    info!("Waiting for signals...");
+    loop {
+        if usr1.load(Ordering::Relaxed) {
+            info!("<b><green>USR1</>: powering <b>ON</>");
+            usr1.store(false, Ordering::Relaxed);
+            // This apparently set active source to Tv??
+            // let _ = connection.send_power_on_devices(CecLogicalAddress::Tv);
+            CONNECTION.with(|conn| {
+                if let Some(connection) = conn.borrow().as_ref() {
                     let power_on_devices_result =
-                        connection.send_power_on_devices(CecLogicalAddress::Playbackdevice2);
+                        connection.send_power_on_devices(CecLogicalAddress::Tv);
                     match power_on_devices_result {
                         Ok(()) => {
-                            info!("");
+                            info!("<b><green>Success!</> Sent power on command to Tv");
                         }
                         Err(e) => {
                             error!(
@@ -262,40 +335,56 @@ fn main() -> Result<(), Box<dyn Error>> {
                     let set_active_source_result: Result<(), cec_rs::CecConnectionResultError> =
                         connection.set_active_source(CecDeviceType::PlaybackDevice);
                     match set_active_source_result {
-                        Ok(()) => {
-                            info!("<b><green>Success!</> Set active source");
+                        Ok(o) => {
+                            info!("<b><green>Success!</> Set active source {:?}", o);
                         }
                         Err(e) => {
                             error!("<b><red>Error:</> Failed to set active source {:?}!", e);
                         }
                     }
-                    info!("<i>would set active source here</>");
                     info!(
                         "<i>connection.get_logical_addresses()</i> = {:?}",
                         connection.get_logical_addresses()
                     );
+                    Ok(()) as Result<(), Box<dyn Error>>
+                } else {
+                    let err_msg = "Failed to open CEC connection";
+                    error!("{}", err_msg);
+                    Err(err_msg.to_string().into())
                 }
-                if usr2.load(Ordering::Relaxed) {
-                    info!("<b><green>USR2</>: powering <b>OFF</>");
-                    usr2.store(false, Ordering::Relaxed);
+            })?;
+        }
+        if usr2.load(Ordering::Relaxed) {
+            info!("<b><green>USR2</>: powering <b>OFF</>");
+            usr2.store(false, Ordering::Relaxed);
+            CONNECTION.with(|conn| {
+                // Get mutable access to the thread_local RefCell contents and set it
+                // *conn.borrow_mut() = cfg.open().ok();
+                if let Some(connection) = conn.borrow().as_ref() {
+                    info!(
+                        "<b><green>Active source:</> <b>{:?}</>",
+                        connection.get_active_source()
+                    );
                     if connection.get_active_source() == CecLogicalAddress::Playbackdevice1 {
                         let _ = connection.send_standby_devices(CecLogicalAddress::Tv);
                     } else {
                         info!("<i>reguest ignored</>: we are not an active source");
                     }
+                    Ok(()) as Result<(), Box<dyn Error>>
+                } else {
+                    let err_msg = "Failed to open CEC connection";
+                    error!("{}", err_msg);
+                    Err(err_msg.to_string().into())
                 }
-                if terminate.load(Ordering::Relaxed) {
-                    info!("Terminating");
-                    break;
-                }
-                thread::sleep(time::Duration::from_secs(1));
-            }
-            Ok(()) as Result<(), Box<dyn Error>>
-        } else {
-            let err_msg = "Failed to open CEC connection";
-            error!("{}", err_msg);
-            Err(err_msg.to_string().into())
+            })?;
         }
-    })?;
-    Ok(())
+        if terminate.load(Ordering::Relaxed) {
+            info!("Terminating");
+            break;
+        }
+        thread::sleep(time::Duration::from_secs(1));
+    }
+    Ok(()) as Result<(), Box<dyn Error>>
+
+    // Ok(())
 }
