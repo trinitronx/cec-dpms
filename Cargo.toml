@@ -14,11 +14,12 @@ homepage = 'https://github.com/manio/cec-dpms'
 repository = 'https://github.com/manio/cec-dpms'
 
 [dependencies]
-cec-rs = '^7.1'
-libcec-sys = '^4.0'
+cec-rs = '^8.0'
+libcec-sys = '^5.0'
 simplelog = { version = "0.11.2", features = ["paris", "ansi_term"] }
 log = '0.4.11'
 signal-hook = "0.3.13"
 clap = { version = "3.0.13", features = ["derive"] }
 hostname = '^0.4'
 arrayvec = '0.7.1'
+# once_cell = '^'

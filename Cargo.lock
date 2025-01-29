@@ -62,9 +62,9 @@ dependencies = [
 
 [[package]]
 name = "cec-rs"
-version = "7.1.1"
+version = "8.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e145c1bda055270216723de373cf4323deb6a13444cab3970792141b381be186"
+checksum = "7f3927b37ac19009ff4391b606f8616ccb08ad35eec46dd3bfeb6d733955eac9"
 dependencies = [
  "arrayvec",
  "derive_builder",
@@ -284,11 +284,12 @@ checksum = "06e509672465a0504304aa87f9f176f2b2b716ed8fb105ebe5c02dc6dce96a94"
 
 [[package]]
 name = "libcec-sys"
-version = "4.0.4"
+version = "5.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d31eb66168740b52376e24bfc1a4e34e17a4fa0de1e748a90620ef4e65274654"
+checksum = "6221fbacfc13e83429c85a96401183ddad54a25fa1d13e713c09ffb8f017c493"
 dependencies = [
  "cc",
+ "cfg-if",
  "cmake",
  "fs_extra",
  "pkg-config",

@@ -4,6 +4,7 @@ use signal_hook::{consts::SIGINT, consts::SIGTERM, consts::SIGUSR1, consts::SIGU
 use simplelog::*;
 use std::cell::RefCell;
 use std::error::Error;
+use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{thread, time};
@@ -248,16 +249,22 @@ fn initialize_connection() -> Option<()> {
 fn main() -> Result<(), Box<dyn Error>> {
     let args = Args::parse();
     logging_init(args.debug);
-    let device_path = args.input.unwrap().into_os_string().into_string().unwrap();
+    // let device_path = args.input.unwrap().into_os_string().into_string().unwrap();
+    let device_path = args.input.unwrap().into_os_string().into_encoded_bytes();
+    let cstring_device_path = unsafe {
+        // SAFETY: We know device_path is a valid path string without interior NUL bytes
+        CString::from_vec_unchecked(device_path)
+    };
+
     info!(
-        "🔘 <b>cec-dpms</> started, about to open CEC connection to: <u>{}</>",
-        &device_path
+        "🔘 <b>cec-dpms</> started, about to open CEC connection to: <u>{:?}</>",
+        &cstring_device_path
     );
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
     let cfg = CecConnectionCfgBuilder::default()
-        .port(device_path)
+        .port(cstring_device_path)
         .device_name(hostname.into())
         .activate_source(true)
         .base_device(CecLogicalAddress::Unknown)
