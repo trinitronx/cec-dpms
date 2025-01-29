@@ -302,16 +302,25 @@ fn main() -> Result<(), Box<dyn Error>> {
                             );
                         }
                     }
+                    info!("Active source: <b>{:?}</>", connection.get_active_source());
+                    // Do not change active source if Tv reports another source is active
+                    // In other words: user viewing preference overrides, and
+                    // accidentally bumping the mouse or keyboard won't
+                    // deactivate another source
                     //the following call is working the same on my samsung, idk what is more proper:
-                    let set_active_source_result: Result<(), cec_rs::CecConnectionResultError> =
-                        connection.set_active_source(CecDeviceType::PlaybackDevice);
-                    match set_active_source_result {
-                        Ok(o) => {
-                            info!("<b><green>Success!</> Set active source {:?}", o);
+                    if connection.is_active_source(CecLogicalAddress::Playbackdevice1) {
+                        let set_active_source_result: Result<(), cec_rs::CecConnectionResultError> =
+                            connection.set_active_source(CecDeviceType::PlaybackDevice);
+                        match set_active_source_result {
+                            Ok(o) => {
+                                info!("<b><green>Success!</> Set active source {:?}", o);
+                            }
+                            Err(e) => {
+                                error!("<b><red>Error:</> Failed to set active source {:?}!", e);
+                            }
                         }
-                        Err(e) => {
-                            error!("<b><red>Error:</> Failed to set active source {:?}!", e);
-                        }
+                    } else {
+                        info!("<b><yellow>Playbackdevice1</> was not active source... skipping");
                     }
                     info!(
                         "<i>connection.get_logical_addresses()</i> = {:?}",
@@ -336,7 +345,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         "<b><green>Active source:</> <b>{:?}</>",
                         connection.get_active_source()
                     );
-                    if connection.get_active_source() == CecLogicalAddress::Playbackdevice1 {
+                    if connection.is_active_source(CecLogicalAddress::Playbackdevice1) {
                         let _ = connection.send_standby_devices(CecLogicalAddress::Tv);
                     } else {
                         info!("<i>reguest ignored</>: we are not an active source");
