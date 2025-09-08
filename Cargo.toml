@@ -14,8 +14,8 @@ homepage = 'https://github.com/manio/cec-dpms'
 repository = 'https://github.com/manio/cec-dpms'
 
 [dependencies]
-cec-rs = '^8.0'
-libcec-sys = '^5.0'
+cec-rs = '^12.0'
+libcec-sys = '^8.0'
 simplelog = { version = "0.11.2", features = ["paris", "ansi_term"] }
 log = '0.4.11'
 signal-hook = "0.3.13"
