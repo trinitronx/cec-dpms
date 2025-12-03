@@ -98,7 +98,7 @@ fn on_command_received(command: CecCommand) {
                         eom: true,
                         ack: false,
                         opcode_set: false,
-                        transmit_timeout: time::Duration::from_secs(5),
+                        transmit_timeout: time::Duration::from_secs(1),
                     });
                 }
                 CecOpcode::ReportPowerStatus => {
@@ -198,7 +198,7 @@ fn report_physical_address(command: &CecCommand, connection: &CecConnection) {
                 opcode_set: true,
                 parameters: cec_rs::CecDatapacket(pkt_data),
                 ack: false,
-                eom: false,
+                eom: true,
                 transmit_timeout: time::Duration::from_secs(1),
             });
             // physical_address: addr,
