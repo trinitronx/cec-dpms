@@ -107,6 +107,13 @@ fn on_command_received(command: CecCommand) {
                         command.opcode, command.initiator, command.destination, command.ack, command.eom, command.parameters, command.opcode_set, command.transmit_timeout
                     );
                 }
+                CecOpcode::GivePhysicalAddress => {
+                    debug!(
+                        "onCommandReceived: Got a GivePhysicalAddress command!!: opcode: {:?}, initiator: {:?}, destination: {:?}, ack: {:?}, eom: {:?}, parameters: {:?}, opcode_set?: {:?}, transmit_timeout: {:?}",
+                        command.opcode, command.initiator, command.destination, command.ack, command.eom, command.parameters, command.opcode_set, command.transmit_timeout
+                    );
+                    report_physical_address(&command, &conn);
+              }
                 _ => {
                     debug!(
                         "onCommandReceived: Unknown command: opcode: {:?}, initiator: {:?}, destination: {:?}",
@@ -155,6 +162,86 @@ fn on_log_message(log_message: CecLogMessage) {
         cec_rs::CecLogLevel::Warning => warn!("{} {}", log_prefix, log_message.message),
         cec_rs::CecLogLevel::Error => error!("{} {}", log_prefix, log_message.message),
     }
+}
+
+fn report_physical_address(command: &CecCommand, connection: &CecConnection) {
+    // CONNECTION.with(|connection| {
+    // if let Some(connection) = connection.borrow().as_ref() {
+
+    // let phys_addr_result = CONNECTION_CONFIG.with(|cfg| {
+    //     cfg.borrow()
+    //         .as_ref()
+    //         .ok_or("No connection config available")
+    //         .as_deref()
+    //         .map_or(Err("No physical address found in connection config"), |c| {
+    //             Ok(c.physical_address)
+    //         })
+    // });
+    let phys_addr_result = connection.0.physical_address;
+    match phys_addr_result {
+        // Ok(Some(addr)) => {
+        Some(addr) => {
+            // let addr = cfg.physical_address.clone();
+            info!("Reporting Physical address: {:#06x}", addr);
+            // let pkt_data: ArrayVec<u8, 64> = ArrayVec::from(addr.to_be_bytes().into());
+            let mut pkt_data: ArrayVec<u8, 64> = addr.to_be_bytes().iter().copied().collect();
+            pkt_data.push(
+                get_logical_address_or_default(Some(CecLogicalAddress::Playbackdevice1)).repr()
+                    as u8,
+            );
+            // let mut raw_pkt_data: ArrayVec<u8, 64> = ArrayVec::new();
+            // let pkt_data: = raw_pkt_data.try_extend_from_slice(&addr.to_be_bytes()).unwrap_or_default(ArrayVec::from([u8 0x10, u8 0x00]));
+            let _ = connection.transmit(cec_rs::CecCommand {
+                initiator: get_logical_address_or_default(Some(CecLogicalAddress::Playbackdevice1)),
+                destination: command.initiator,
+                opcode: cec_rs::CecOpcode::GivePhysicalAddress,
+                opcode_set: true,
+                parameters: cec_rs::CecDatapacket(pkt_data),
+                ack: false,
+                eom: false,
+                transmit_timeout: time::Duration::from_secs(1),
+            });
+            // physical_address: addr,
+            // device_type: CecDeviceType::PlaybackDevice,
+            // });
+        }
+        // Ok(None) => {
+        None => {
+            error!("No physical address found in connection config");
+        } // Err(e) => {
+          //     error!("Failed to get physical address: {:?}", e);
+          // }
+    }
+    // } else {
+    //     error!("Failed to open CEC connection");
+    // }
+    // });
+}
+
+fn get_logical_address_or_default(default_addr: Option<CecLogicalAddress>) -> CecLogicalAddress {
+    // Fallback default if default_addr was None
+    let default = CecLogicalAddress::Playbackdevice1;
+
+    // CONNECTION.with(|conn| {
+    // Get mutable access to the thread_local RefCell contents and set it
+    // *conn.borrow_mut() = cfg.open().ok();
+    // connection = cfg.open().unwrap();
+    // if let Some(connection) = conn.borrow().as_ref() {
+    if let Some(Some(connection)) = CONNECTION.get() {
+        connection.get_logical_addresses()
+                .map(|addrs| addrs.primary.into())
+                .unwrap_or_else(|e| {
+                    warn!(
+                        "<b><yellow>Warn:</> could not detect my logical address. Using default: {:#?}\n{:?}",
+                        default_addr.unwrap_or(default),
+                        e
+                    );
+                    default_addr.unwrap_or(default)
+                })
+    } else {
+        default_addr.unwrap_or(default)
+    }
+    // })
 }
 
 /// Returns the hostname of the current system, for use with CEC `OSD Name`.
