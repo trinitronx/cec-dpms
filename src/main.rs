@@ -15,7 +15,6 @@ use cec_rs::{
     CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecDeviceType,
     CecDeviceTypeVec, CecLogMessage, CecLogicalAddress, CecOpcode,
 };
-use libcec_sys::CEC_INVALID_PHYSICAL_ADDRESS;
 
 use std::sync::atomic::AtomicUsize;
 
@@ -269,7 +268,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .activate_source(true)
         // .base_device(CecLogicalAddress::Unknown)
         .base_device(CecLogicalAddress::Tv)
-        .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
+        // .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
         // .physical_address(0x3000)
         .hdmi_port(3)
         .command_received_callback(Box::new(on_command_received))
