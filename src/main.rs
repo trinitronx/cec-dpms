@@ -114,6 +114,20 @@ fn on_command_received(command: CecCommand) {
                     );
                     report_physical_address(&command, &conn);
               }
+              CecOpcode::VendorCommand => {
+                    debug!(
+                        "onCommandReceived: Got a VendorCommand command!!: opcode: {:?}, initiator: {:?}, destination: {:?}, ack: {:?}, eom: {:?}, parameters: {:?}, opcode_set?: {:?}, transmit_timeout: {:?}",
+                        command.opcode, command.initiator, command.destination, command.ack, command.eom, command.parameters, command.opcode_set, command.transmit_timeout
+                    );
+                    handle_vendor_command(&command, &conn);
+              }
+              CecOpcode::DeviceVendorId => {
+                    debug!(
+                        "onCommandReceived: Got a DeviceVendorId command!!: opcode: {:?}, initiator: {:?}, destination: {:?}, ack: {:?}, eom: {:?}, parameters: {:?}, opcode_set?: {:?}, transmit_timeout: {:?}",
+                        command.opcode, command.initiator, command.destination, command.ack, command.eom, command.parameters, command.opcode_set, command.transmit_timeout
+                    );
+                    handle_device_vendor_id(&command);
+                }
                 _ => {
                     debug!(
                         "onCommandReceived: Unknown command: opcode: {:?}, initiator: {:?}, destination: {:?}",
@@ -216,6 +230,105 @@ fn report_physical_address(command: &CecCommand, connection: &CecConnection) {
     //     error!("Failed to open CEC connection");
     // }
     // });
+}
+
+/// Handle `CecOpcode::VendorCommand`
+///
+/// This function handles the `cec_rs::CecOpcode::VendorCommand` by responding
+/// with a `cec_rs::CecOpcode::FeatureAbort`, and parameters:
+///   - Feature Opcode: `cec_rs::CecOpcode::VendorCommand`
+///   - Abort Reason: `cec_rs::CecAbortReason::UnrecognizedOpcode`
+fn handle_vendor_command(command: &CecCommand, connection: &CecConnection) {
+    info!(
+        "handle_vendor_command: Received VendorCommand from {:?} with parameters: {:#06x?}",
+        command.initiator,
+        command.parameters.0.as_slice(),
+    );
+    let mut pkt_data: ArrayVec<u8, 64> = ArrayVec::new();
+    pkt_data.push(cec_rs::CecOpcode::VendorCommand as u8);
+    pkt_data.push(cec_rs::CecAbortReason::UnrecognizedOpcode as u8);
+    let _ = connection.transmit(cec_rs::CecCommand {
+        initiator: get_logical_address_or_default(Some(CecLogicalAddress::Playbackdevice1)),
+        destination: command.initiator,
+        opcode: cec_rs::CecOpcode::FeatureAbort,
+        opcode_set: true,
+        parameters: cec_rs::CecDatapacket(pkt_data.clone()),
+        ack: false,
+        eom: true,
+        transmit_timeout: time::Duration::from_secs(1),
+    });
+    debug!(
+        "handle_vendor_command: Sent FeatureAbort with opcode VendorCommand, reason UnrecognizedOpcode to {:?} ({})",
+        command.initiator,
+        pkt_data
+            .iter()
+            .map(|b| format!("{:02x?}", b))
+            .collect::<Vec<_>>()
+            .join(":"),
+    )
+}
+
+/// Handle `CecOpcode::DeviceVendorId`
+///
+/// This function handles the `cec_rs::CecOpcode::DeviceVendorId` command by
+/// simply logging a friendly vendor ID in both `String` and the resulting `u32`
+/// converted from the raw command bytes.
+///
+/// ## Known Issues
+///
+/// - The internal `VENDOR_IDS` lookup table is hardcoded with values from
+///   lower-level library `libcec_sys::cec_vendor_id_*`.
+/// - It would be better if the `cec_rs::CecVendorId` `enum` implemented `From`
+///   or `TryFrom` traits instead. Then, we could compare against this type.
+/// - The lower-level `libcec` code already logs the vendor id in a different
+///   format. For example:
+///
+///       [DEBUG] (2) cec_dpms: libcec: >> TV (0) -> Broadcast (F): device vendor id (87)
+///       [DEBUG] (2) cec_dpms: libcec: << Playback 1 (4) -> Broadcast (F): vendor id LG (e091)
+///
+fn handle_device_vendor_id(command: &CecCommand) {
+    // TODO: Implement external TryFrom trait for cec_rs::CecVendorId
+    // For now, this will have to do...
+    const VENDOR_IDS: &[(&str, u32)] = &[
+        ("LG", libcec_sys::cec_vendor_id_LG),
+        ("Samsung", libcec_sys::cec_vendor_id_SAMSUNG),
+        ("Sony", libcec_sys::cec_vendor_id_SONY),
+        ("Panasonic", libcec_sys::cec_vendor_id_PANASONIC),
+        ("Vizio", libcec_sys::cec_vendor_id_VIZIO),
+    ];
+
+    let vendor_bytes = command.parameters.0.as_slice();
+    // Hack: Assume vendor_bytes[0..3] is enough to identify all possible vendors
+    // According to cec-o-matic, the max value for a vendor id is: 16777215
+    // This translates to FF:FF:FF in hex
+    // For example raw CEC command: 0F:87:ff:ff:ff
+    // So, this assumption holds, since we should always have 3 bytes
+    if vendor_bytes.len() == 3 {
+        let vendor_id = u32::from_be_bytes([0, vendor_bytes[0], vendor_bytes[1], vendor_bytes[2]]);
+        let (vendor_name, vendor_id) = (
+            VENDOR_IDS
+                .iter()
+                .find(|(_, id)| *id == vendor_id)
+                .map(|(name, _)| name.to_string())
+                .unwrap_or_else(|| format!("Unknown (0x{:06x})", vendor_id)),
+            vendor_id,
+        );
+        info!(
+            "Device vendor ID from {:?}: {} ({} = 0x{:04x})",
+            command.initiator, vendor_name, vendor_id, vendor_id
+        );
+    } else {
+        let vendor_name = "Unknown (insufficient data)";
+        let vendor_id = vendor_bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+            .join(":");
+        info!(
+            "Device vendor ID from {:?}: {} ({})",
+            command.initiator, vendor_name, vendor_id
+        );
+    };
 }
 
 fn get_logical_address_or_default(default_addr: Option<CecLogicalAddress>) -> CecLogicalAddress {
