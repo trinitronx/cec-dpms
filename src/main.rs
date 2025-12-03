@@ -265,6 +265,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let cfg = CecConnectionCfgBuilder::default()
         .port(CString::new(device_path)?)
         .device_name(hostname.into())
+        .activate_source(true)
+        .base_device(CecLogicalAddress::Unknown)
+        // .base_device(CecLogicalAddress::Tv)
+        // .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
+        .physical_address(0x3000)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
         // Only RecordingDevice types get remote button passthrough
