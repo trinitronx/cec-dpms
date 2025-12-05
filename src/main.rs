@@ -18,6 +18,9 @@ use cec_rs::{
 
 use std::sync::atomic::AtomicUsize;
 
+mod config;
+use config::CecDpmsConfig;
+
 static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Parser, Debug)]
