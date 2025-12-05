@@ -3,7 +3,7 @@ use arrayvec::ArrayVec;
 use cec_rs::CecLogicalAddress;
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct CecDpmsConfig {
     pub hdmi_port: u8,
     base_device: String, // Deserialize as string, convert to enum
@@ -28,7 +28,7 @@ impl CecDpmsConfig {
     ///
     pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let contents = std::fs::read_to_string(path)?;
-        Ok(serde_yaml::from_str(&contents)?)
+        Ok(serde_saphyr::from_str(contents.as_str())?)
     }
 
     /// Convert `base_device` `String` into a `CecLogicalAddress` `enum`.
