@@ -157,6 +157,43 @@ fn on_log_message(log_message: CecLogMessage) {
     }
 }
 
+/// Check if any of this CEC adapter's addresses are the active source
+///
+/// Returns `true` if any logical addresses are active, `false` if none are.
+///
+fn is_adapter_active_source(conn: &CecConnection) -> bool {
+    let Ok(my_addrs) = conn.get_logical_addresses() else {
+        warn!("Error getting this adapter's logical addresses");
+        return false;
+    };
+
+    let mut is_active = conn.is_active_source(my_addrs.primary.into());
+    debug!(
+        "Is my primary address, {:?} the active source? {}",
+        my_addrs.primary, is_active
+    );
+
+    for addr in my_addrs.addresses {
+        let is_this_addr_active = conn.is_active_source(addr.into());
+        debug!(
+            "Checking if my address: {:?} is active source? {}",
+            addr, is_this_addr_active
+        );
+        is_active |= is_this_addr_active;
+    }
+
+    is_active
+}
+
+/// Get this CEC adapter's primary logical address
+fn get_primary_address(conn: &CecConnection) -> CecLogicalAddress {
+    let Ok(my_addrs) = conn.get_logical_addresses() else {
+        warn!("Error getting this adapter's logical addresses");
+        return cec_rs::CecLogicalAddress::Unknown;
+    };
+    my_addrs.primary.into()
+}
+
 /// Returns the hostname of the current system, for use with CEC `OSD Name`.
 ///
 /// This function gets the system hostname and returns it, or in the case of a
@@ -223,12 +260,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
+    let mut my_devices = ArrayVec::new();
+    my_devices.push(CecDeviceType::PlaybackDevice);
     let cfg = CecConnectionCfgBuilder::default()
         .port(CString::new(device_path)?)
         .device_name(hostname.into())
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
-        .device_types(CecDeviceTypeVec::new(CecDeviceType::PlaybackDevice))
+        // Only RecordingDevice types get remote button passthrough
+        .device_types(CecDeviceTypeVec(my_devices))
         .build()
         .unwrap();
     // Setup signal handling flags
@@ -265,7 +305,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         .map(|conn| {
             info!(
                 "Am I active source? <b>{:?}</>",
-                conn.is_active_source(CecLogicalAddress::Playbackdevice1)
+                is_adapter_active_source(&conn)
             );
             info!("Active source: <b>{:?}</>", conn.get_active_source());
             Ok(()) as Result<(), Box<dyn Error>>
@@ -308,9 +348,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // accidentally bumping the mouse or keyboard won't
                     // deactivate another source
                     //the following call is working the same on my samsung, idk what is more proper:
-                    if connection.is_active_source(CecLogicalAddress::Playbackdevice1) {
+                    if is_adapter_active_source(connection) {
                         let set_active_source_result: Result<(), cec_rs::CecConnectionResultError> =
-                            connection.set_active_source(CecDeviceType::PlaybackDevice);
+                            connection
+                                .set_active_source(get_primary_address(connection).try_into()?);
                         match set_active_source_result {
                             Ok(o) => {
                                 info!("<b><green>Success!</> Set active source {:?}", o);
@@ -345,10 +386,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                         "<b><green>Active source:</> <b>{:?}</>",
                         connection.get_active_source()
                     );
-                    if connection.is_active_source(CecLogicalAddress::Playbackdevice1) {
+                    if is_adapter_active_source(connection) {
                         let _ = connection.send_standby_devices(CecLogicalAddress::Tv);
                     } else {
-                        info!("<i>reguest ignored</>: we are not an active source");
+                        info!("<i>request ignored</>: we are not an active source");
                     }
                     Ok(()) as Result<(), Box<dyn Error>>
                 } else {
