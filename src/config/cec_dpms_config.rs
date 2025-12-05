@@ -105,3 +105,49 @@ impl std::fmt::Debug for CecDpmsConfig {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_cec_dpms_config_load() {
+        let yaml = r#"
+hdmi_port: 4
+base_device: "Tv"
+activate_source: true
+physical_address: 0x3000
+device_types:
+- RecordingDevice
+- PlaybackDevice
+"#;
+        let expected = CecDpmsConfig {
+            hdmi_port: 4,
+            base_device: String::from("Tv"),
+            activate_source: true,
+            physical_address: 0x3000,
+            device_types: ["RecordingDevice", "PlaybackDevice"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        };
+        let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        // Assert parsed config matches expected
+        assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_cec_dpms_config_base_device() {
+        let cec_dpms_config = CecDpmsConfig {
+            hdmi_port: 4,
+            base_device: String::from("Tv"),
+            activate_source: true,
+            physical_address: 0x3000,
+            device_types: ["RecordingDevice", "PlaybackDevice"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        };
+        assert_eq!(cec_dpms_config.base_device(), CecLogicalAddress::Tv);
+    }
+}
