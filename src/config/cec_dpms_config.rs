@@ -1,6 +1,6 @@
 /// config: A config module supporting a YAML config file
 use arrayvec::ArrayVec;
-use cec_rs::CecLogicalAddress;
+use cec_rs::{CecDeviceType, CecLogicalAddress};
 use libcec_sys::{CEC_DEFAULT_BASE_DEVICE, CEC_DEFAULT_HDMI_PORT, CEC_DEFAULT_PHYSICAL_ADDRESS};
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +52,88 @@ mod cec_logical_address_serde {
     }
 }
 
+mod cec_device_types_serde {
+    use arrayvec::ArrayVec;
+    use cec_rs::CecDeviceType;
+    use serde::{de, Deserializer, Serializer};
+    use std::fmt;
+
+    /// Serialize `device_types` `ArrayVec<CecDeviceType, 5>` into a sequence of
+    /// strings.
+    ///
+    /// This is a `Serialize` trait implementation to convert an array of
+    /// `CecDeviceType` enum variants into strings for use in config file and
+    /// serialization formats.
+    pub fn serialize<S>(
+        devices: &ArrayVec<CecDeviceType, 5>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        use serde::ser::SerializeSeq;
+        let mut seq = serializer.serialize_seq(Some(devices.len()))?;
+        for device in devices {
+            seq.serialize_element(&format!("{:?}", device))?;
+        }
+        seq.end()
+    }
+
+    /// Deserialize and convert a sequence of device type strings into
+    /// `ArrayVec<CecDeviceType, 5>`.
+    ///
+    /// This is a `Deserialize` trait implementation to coerce an `Array` of
+    /// strings provided in the config file into an `ArrayVec` of
+    /// `CecDeviceType` enum variants. Max capacity `5` of the `ArrayVec` is set
+    /// to be compatible with the `cec-rs::CecDeviceTypeVec` destination type.
+    /// Matching is case-insensitive. Unknown values are silently skipped.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ArrayVec<CecDeviceType, 5>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct DeviceTypesVisitor;
+
+        impl<'de> de::Visitor<'de> for DeviceTypesVisitor {
+            type Value = ArrayVec<CecDeviceType, 5>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("a sequence of device type strings")
+            }
+
+            fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+            where
+                A: de::SeqAccess<'de>,
+            {
+                let mut devices = ArrayVec::new();
+
+                while let Some(device_str) = seq.next_element::<String>()? {
+                    match device_str.to_lowercase().as_str() {
+                        "tv" => devices.push(CecDeviceType::Tv),
+                        "recordingdevice" => devices.push(CecDeviceType::RecordingDevice),
+                        "reserved" => devices.push(CecDeviceType::Reserved),
+                        "tuner" => devices.push(CecDeviceType::Tuner),
+                        "playbackdevice" => devices.push(CecDeviceType::PlaybackDevice),
+                        "audiosystem" => devices.push(CecDeviceType::AudioSystem),
+                        unknown => {
+                            // Log unknown but don't fail - silently skip
+                            eprintln!("Warning: Unknown device type in config: {}", unknown);
+                        }
+                    }
+
+                    // Stop if we've reached capacity
+                    if devices.is_full() {
+                        break;
+                    }
+                }
+
+                Ok(devices)
+            }
+        }
+
+        deserializer.deserialize_seq(DeviceTypesVisitor)
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct CecDpmsConfig {
@@ -60,7 +142,8 @@ pub struct CecDpmsConfig {
     pub base_device: CecLogicalAddress,
     pub activate_source: bool,
     pub physical_address: u16,
-    pub device_types: ArrayVec<String, 5>,
+    #[serde(with = "cec_device_types_serde")]
+    pub device_types: ArrayVec<CecDeviceType, 5>,
 }
 
 /// `Default` trait implementation for `CecDpmsConfig`
@@ -69,13 +152,13 @@ pub struct CecDpmsConfig {
 ///
 ///     CecDpmsConfig {
 ///            hdmi_port: 1,
-///            base_device: "Tv",
+///            base_device: Tv,
 ///            activate_source: true,
 ///            physical_address: 0x1000,
 ///            device_types: [
-///                "PlaybackDevice",
+///                PlaybackDevice,
 ///            ],
-///        }
+///     }
 impl Default for CecDpmsConfig {
     fn default() -> Self {
         CecDpmsConfig {
@@ -84,7 +167,7 @@ impl Default for CecDpmsConfig {
                 .unwrap_or(CecLogicalAddress::Unknown),
             activate_source: false,
             physical_address: CEC_DEFAULT_PHYSICAL_ADDRESS.try_into().unwrap(),
-            device_types: ["PlaybackDevice"].into_iter().map(String::from).collect(),
+            device_types: [CecDeviceType::PlaybackDevice].into_iter().collect(),
         }
     }
 }
@@ -176,10 +259,12 @@ mod test {
             base_device: CecLogicalAddress::Tv,
             activate_source: true,
             physical_address: 0x3000,
-            device_types: ["RecordingDevice", "PlaybackDevice"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            device_types: [
+                CecDeviceType::RecordingDevice,
+                CecDeviceType::PlaybackDevice,
+            ]
+            .into_iter()
+            .collect(),
         };
         let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
         // Assert parsed config matches expected
@@ -193,10 +278,12 @@ mod test {
             base_device: CecLogicalAddress::Tv,
             activate_source: true,
             physical_address: 0x3000,
-            device_types: ["RecordingDevice", "PlaybackDevice"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect(),
+            device_types: [
+                CecDeviceType::RecordingDevice,
+                CecDeviceType::PlaybackDevice,
+            ]
+            .into_iter()
+            .collect(),
         };
         assert_eq!(cec_dpms_config.base_device, CecLogicalAddress::Tv);
     }
