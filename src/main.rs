@@ -12,14 +12,14 @@ use std::{thread, time};
 use arrayvec::ArrayVec;
 extern crate cec_rs;
 use cec_rs::{
-    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecDeviceType,
-    CecDeviceTypeVec, CecLogMessage, CecLogicalAddress, CecOpcode,
+    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecLogMessage,
+    CecLogicalAddress, CecOpcode,
 };
 
 use std::sync::atomic::AtomicUsize;
 
 mod config;
-use config::CecDpmsConfig;
+use config::{resolve_config_path, CecDpmsConfig};
 
 static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -263,21 +263,26 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
-    let mut my_devices = ArrayVec::new();
-    my_devices.push(CecDeviceType::PlaybackDevice);
+    let config_path = resolve_config_path();
+    info!("Resolved config file path: <u>{:?}</>", config_path);
+    let dpms_config = CecDpmsConfig::load(config_path.to_str().unwrap_or("")).unwrap_or_else(
+        |e| -> CecDpmsConfig {
+            error!("Error parsing config file: {:?}", e);
+            warn!("Using default values for cec-dpms config");
+            CecDpmsConfig::default()
+        },
+    );
+    info!("Loaded cec-dpms config: {:#?}", dpms_config);
     let cfg = CecConnectionCfgBuilder::default()
         .port(CString::new(device_path)?)
         .device_name(hostname.into())
-        .activate_source(true)
-        // .base_device(CecLogicalAddress::Unknown)
-        .base_device(CecLogicalAddress::Tv)
-        // .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
-        // .physical_address(0x3000)
-        .hdmi_port(3)
+        .activate_source(dpms_config.activate_source)
+        .base_device(dpms_config.base_device)
+        .physical_address(dpms_config.physical_address)
+        .hdmi_port(dpms_config.hdmi_port)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
-        // Only RecordingDevice types get remote button passthrough
-        .device_types(CecDeviceTypeVec(my_devices))
+        .device_types(cec_rs::CecDeviceTypeVec(dpms_config.device_types))
         .build()
         .unwrap();
     // Setup signal handling flags
