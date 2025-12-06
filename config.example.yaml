@@ -1,0 +1,15 @@
+## Example cec-dpms config
+## Uncomment settings as needed
+## Rename this to: config.yaml
+## Place in one of these locations:
+##  - /etc/cec-dpms/config.yaml
+##  - $XDG_CONFIG_HOME/cec-dpms/config.yaml
+##  - $HOME/.config/cec-dpms/config.yaml
+#hdmi_port: 4
+#base_device: "Tv"
+#activate_source: true
+#physical_address: 0x4000
+#device_types:
+#  - PlaybackDevice
+#  - RecordingDevice
+## Note: Only RecordingDevice types get remote button passthrough
