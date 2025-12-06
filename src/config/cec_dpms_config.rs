@@ -164,15 +164,13 @@ mod test {
 
     #[test]
     fn test_cec_dpms_config_load() {
-        let yaml = r#"
-hdmi_port: 4
-base_device: "Tv"
-activate_source: true
-physical_address: 0x3000
-device_types:
-- RecordingDevice
-- PlaybackDevice
-"#;
+        let yaml = "hdmi_port: 4\n\
+                          base_device: \"Tv\"\n\
+                          activate_source: true\n\
+                          physical_address: 0x3000\n\
+                          device_types:\n\
+                          - RecordingDevice\n\
+                          - PlaybackDevice";
         let expected = CecDpmsConfig {
             hdmi_port: 4,
             base_device: CecLogicalAddress::Tv,
@@ -205,10 +203,8 @@ device_types:
 
     #[test]
     fn test_cec_dpms_config_load_error() {
-        let yaml = r#"
----
-invalid_config: true
-"#;
+        let yaml = "---\n\
+                          invalid_config: true";
         let expected = CecDpmsConfig::default();
         let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
         // Assert parsed config matches expected
