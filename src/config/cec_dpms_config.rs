@@ -151,13 +151,13 @@ pub struct CecDpmsConfig {
 /// Defaults to:
 ///
 ///     CecDpmsConfig {
-///            hdmi_port: 1,
-///            base_device: Tv,
-///            activate_source: true,
-///            physical_address: 0x1000,
-///            device_types: [
-///                PlaybackDevice,
-///            ],
+///         hdmi_port: 1,
+///         base_device: Tv,
+///         activate_source: true,
+///         physical_address: 0x1000,
+///         device_types: [
+///             PlaybackDevice,
+///         ],
 ///     }
 impl Default for CecDpmsConfig {
     fn default() -> Self {
@@ -220,6 +220,12 @@ impl std::fmt::Display for CecDpmsConfig {
 ///
 /// Print the `CecDpmsConfig` contents with more detailed representation of the
 /// internal struct contents.
+///
+/// Again the hexidecimal CEC physical address is printed as a dot-separated
+/// string.
+///
+/// **Note:** The internal representation is a `u16`, but the common dot-sparated CEC
+/// address notation is used for `Debug` and pretty-print.
 impl std::fmt::Debug for CecDpmsConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = self.physical_address;
