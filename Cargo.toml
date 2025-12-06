@@ -24,3 +24,4 @@ arrayvec = { version = '0.7.6', features = ["serde"]}
 serde = { version = "1.0", features = ["derive"] }
 serde-saphyr = "0.0.10"
 libcec-sys = "^9.0.3"
+directories = "6.0"
