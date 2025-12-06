@@ -4,6 +4,7 @@ use cec_rs::CecLogicalAddress;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct CecDpmsConfig {
     pub hdmi_port: u8,
     base_device: String, // Deserialize as string, convert to enum
