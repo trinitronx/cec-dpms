@@ -278,20 +278,52 @@ mod test {
     }
 
     #[test]
-    fn test_cec_dpms_config_base_device() {
-        let cec_dpms_config = CecDpmsConfig {
-            hdmi_port: 4,
-            base_device: CecLogicalAddress::Tv,
-            activate_source: true,
-            physical_address: 0x3000,
-            device_types: [
-                CecDeviceType::RecordingDevice,
-                CecDeviceType::PlaybackDevice,
-            ]
-            .into_iter()
-            .collect(),
-        };
-        assert_eq!(cec_dpms_config.base_device, CecLogicalAddress::Tv);
+    fn test_cec_dpms_config_base_device_deserialize_case_insensitive() {
+        let test_cases = vec![
+            ("tv", CecLogicalAddress::Tv),
+            ("TV", CecLogicalAddress::Tv),
+            ("PlaybackDevice1", CecLogicalAddress::Playbackdevice1),
+            ("RECORDINGDEVICE2", CecLogicalAddress::Recordingdevice2),
+            ("audiosystem", CecLogicalAddress::Audiosystem),
+            ("audiosystem", CecLogicalAddress::Audiosystem),
+            ("InvalidDevice", CecLogicalAddress::Unknown),
+            ("xyz123", CecLogicalAddress::Unknown),
+        ];
+
+        for (input, expected) in test_cases {
+            let yaml = format!("base_device: \"{}\"", input);
+            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            assert_eq!(config.base_device, expected, "Failed for input: {}", input);
+        }
+    }
+
+    #[test]
+    fn test_cec_dpms_config_base_device_deserialize() {
+        let test_cases = vec![
+            ("tv", CecLogicalAddress::Tv),
+            ("recordingdevice1", CecLogicalAddress::Recordingdevice1),
+            ("recordingdevice2", CecLogicalAddress::Recordingdevice2),
+            ("tuner1", CecLogicalAddress::Tuner1),
+            ("playbackdevice1", CecLogicalAddress::Playbackdevice1),
+            ("audiosystem", CecLogicalAddress::Audiosystem),
+            ("tuner2", CecLogicalAddress::Tuner2),
+            ("tuner3", CecLogicalAddress::Tuner3),
+            ("playbackdevice2", CecLogicalAddress::Playbackdevice2),
+            ("recordingdevice3", CecLogicalAddress::Recordingdevice3),
+            ("tuner4", CecLogicalAddress::Tuner4),
+            ("playbackdevice3", CecLogicalAddress::Playbackdevice3),
+            ("reserved1", CecLogicalAddress::Reserved1),
+            ("reserved2", CecLogicalAddress::Reserved2),
+            ("freeuse", CecLogicalAddress::Freeuse),
+            ("unregistered", CecLogicalAddress::Unregistered),
+            ("invalid", CecLogicalAddress::Unknown),
+        ];
+
+        for (input, expected) in test_cases {
+            let yaml = format!("base_device: \"{}\"", input);
+            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            assert_eq!(config.base_device, expected, "Failed for input: {}", input);
+        }
     }
 
     #[test]
