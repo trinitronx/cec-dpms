@@ -107,22 +107,26 @@ mod cec_device_types_serde {
                 let mut devices = ArrayVec::new();
 
                 while let Some(device_str) = seq.next_element::<String>()? {
-                    match device_str.to_lowercase().as_str() {
-                        "tv" => devices.push(CecDeviceType::Tv),
-                        "recordingdevice" => devices.push(CecDeviceType::RecordingDevice),
-                        "reserved" => devices.push(CecDeviceType::Reserved),
-                        "tuner" => devices.push(CecDeviceType::Tuner),
-                        "playbackdevice" => devices.push(CecDeviceType::PlaybackDevice),
-                        "audiosystem" => devices.push(CecDeviceType::AudioSystem),
-                        unknown => {
-                            // Log unknown but don't fail - silently skip
-                            eprintln!("Warning: Unknown device type in config: {}", unknown);
+                    // Only add to ArrayVec if there's capacity; silently skip overflow
+                    if !devices.is_full() {
+                        match device_str.to_lowercase().as_str() {
+                            "tv" => devices.push(CecDeviceType::Tv),
+                            "recordingdevice" => devices.push(CecDeviceType::RecordingDevice),
+                            "reserved" => devices.push(CecDeviceType::Reserved),
+                            "tuner" => devices.push(CecDeviceType::Tuner),
+                            "playbackdevice" => devices.push(CecDeviceType::PlaybackDevice),
+                            "audiosystem" => devices.push(CecDeviceType::AudioSystem),
+                            unknown => {
+                                // Log unknown but don't fail - silently skip
+                                eprintln!("Warning: Unknown device type in config: {}", unknown);
+                            }
                         }
-                    }
-
-                    // Stop if we've reached capacity
-                    if devices.is_full() {
-                        break;
+                    } else {
+                        // Capacity exceeded, silently skip remaining items
+                        eprintln!(
+                            "Warning: Too many device types in config (max 5), ignoring: {}",
+                            device_str
+                        );
                     }
                 }
 
