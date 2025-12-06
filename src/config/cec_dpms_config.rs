@@ -327,6 +327,90 @@ mod test {
     }
 
     #[test]
+    fn test_cec_dpms_config_device_types_deserialize_case_insensitive() {
+        let test_cases = vec![
+            ("tv", CecDeviceType::Tv),
+            ("TV", CecDeviceType::Tv),
+            ("Tv", CecDeviceType::Tv),
+            ("recordingdevice", CecDeviceType::RecordingDevice),
+            ("RECORDINGDEVICE", CecDeviceType::RecordingDevice),
+            ("RecordingDevice", CecDeviceType::RecordingDevice),
+            ("reserved", CecDeviceType::Reserved),
+            ("RESERVED", CecDeviceType::Reserved),
+            ("tuner", CecDeviceType::Tuner),
+            ("TUNER", CecDeviceType::Tuner),
+            ("playbackdevice", CecDeviceType::PlaybackDevice),
+            ("PLAYBACKDEVICE", CecDeviceType::PlaybackDevice),
+            ("PlaybackDevice", CecDeviceType::PlaybackDevice),
+            ("audiosystem", CecDeviceType::AudioSystem),
+            ("AUDIOSYSTEM", CecDeviceType::AudioSystem),
+            ("AudioSystem", CecDeviceType::AudioSystem),
+        ];
+
+        for (input, expected) in test_cases {
+            let yaml = format!("device_types:\n  - \"{}\"", input);
+            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            assert!(
+                config.device_types.contains(&expected),
+                "Failed for input: {} (expected {:?})",
+                input,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn test_cec_dpms_config_device_types_deserialize_multiple() {
+        let yaml = "device_types:\n\
+                          - PlaybackDevice\n\
+                          - RecordingDevice\n\
+                          - Tuner\n\
+                          - AudioSystem";
+        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        assert_eq!(config.device_types.len(), 4);
+        assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
+        assert_eq!(config.device_types[1], CecDeviceType::RecordingDevice);
+        assert_eq!(config.device_types[2], CecDeviceType::Tuner);
+        assert_eq!(config.device_types[3], CecDeviceType::AudioSystem);
+    }
+
+    #[test]
+    fn test_cec_dpms_config_device_types_deserialize_unknown_skipped() {
+        let yaml = "device_types:\n\
+                          - PlaybackDevice\n\
+                          - InvalidDevice\n\
+                          - Tuner\n\
+                          - UnknownType\n\
+                          - AudioSystem";
+        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        // Unknown values are skipped, so we should only have 3 valid types
+        assert_eq!(config.device_types.len(), 3);
+        assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
+        assert_eq!(config.device_types[1], CecDeviceType::Tuner);
+        assert_eq!(config.device_types[2], CecDeviceType::AudioSystem);
+    }
+
+    #[test]
+    fn test_cec_dpms_config_device_types_deserialize_capacity_limit() {
+        // Test with more items than capacity (max 5)
+        let yaml = "device_types:\n\
+                          - PlaybackDevice\n\
+                          - RecordingDevice\n\
+                          - Tuner\n\
+                          - AudioSystem\n\
+                          - Reserved\n\
+                          - Tv\n";
+        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        // Should only contain the first 5 items, silently skipping overflow
+        assert_eq!(config.device_types.len(), 5);
+        assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
+        assert_eq!(config.device_types[1], CecDeviceType::RecordingDevice);
+        assert_eq!(config.device_types[2], CecDeviceType::Tuner);
+        assert_eq!(config.device_types[3], CecDeviceType::AudioSystem);
+        assert_eq!(config.device_types[4], CecDeviceType::Reserved);
+    }
+
+    #[test]
     fn test_cec_dpms_config_load_error() {
         let yaml = "---\n\
                           invalid_config: true";
