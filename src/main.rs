@@ -370,7 +370,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                     } else {
-                        info!("<b><yellow>Playbackdevice1</> was not active source... skipping");
+                        info!(
+                            "<b><yellow>{:?}</> was not active source... skipping",
+                            get_primary_address(connection)
+                        );
                     }
                     info!(
                         "<i>connection.get_logical_addresses()</i> = {:?}",
