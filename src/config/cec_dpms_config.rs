@@ -63,22 +63,35 @@ pub struct CecDpmsConfig {
     pub device_types: ArrayVec<String, 5>,
 }
 
+/// `Default` trait implementation for `CecDpmsConfig`
+///
+/// Defaults to:
+///
+///     CecDpmsConfig {
+///            hdmi_port: 1,
+///            base_device: "Tv",
+///            activate_source: true,
+///            physical_address: 0x1000,
+///            device_types: [
+///                "PlaybackDevice",
+///            ],
+///        }
 impl Default for CecDpmsConfig {
     fn default() -> Self {
         CecDpmsConfig {
-            hdmi_port: CEC_DEFAULT_HDMI_PORT as u8, // 1
+            hdmi_port: CEC_DEFAULT_HDMI_PORT as u8,
             base_device: CecLogicalAddress::from_repr(CEC_DEFAULT_BASE_DEVICE as i32)
                 .unwrap_or(CecLogicalAddress::Unknown),
             activate_source: false,
-            physical_address: CEC_DEFAULT_PHYSICAL_ADDRESS.try_into().unwrap(), // 0x1000
-            device_types: ["PlaybackDevice"].into_iter().map(String::from).collect(), // PlaybackDevice
+            physical_address: CEC_DEFAULT_PHYSICAL_ADDRESS.try_into().unwrap(),
+            device_types: ["PlaybackDevice"].into_iter().map(String::from).collect(),
         }
     }
 }
 
-/// CecDpmsConfig implementation
+/// `CecDpmsConfig` implementation
 impl CecDpmsConfig {
-    /// CecDpmsConfig file loader
+    /// `CecDpmsConfig` file loader
     ///
     /// # Example Config
     ///
@@ -96,9 +109,9 @@ impl CecDpmsConfig {
     }
 }
 
-/// Display trait implementation for CecDpmsConfig
+/// `Display` trait implementation for `CecDpmsConfig`
 ///
-/// Print the CecDpmsConfig contents as a single-line representation.
+/// Print the `CecDpmsConfig` contents as a single-line representation.
 ///
 /// Notably, print the hexidecimal CEC physical address as a dot-separated string.
 impl std::fmt::Display for CecDpmsConfig {
@@ -120,9 +133,10 @@ impl std::fmt::Display for CecDpmsConfig {
     }
 }
 
-/// Debug trait implementation for CecDpmsConfig
+/// `Debug` trait implementation for `CecDpmsConfig`
 ///
-/// Print the CecDpmsConfig contents with more
+/// Print the `CecDpmsConfig` contents with more detailed representation of the
+/// internal struct contents.
 impl std::fmt::Debug for CecDpmsConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = self.physical_address;
