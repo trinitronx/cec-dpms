@@ -30,6 +30,10 @@ struct Args {
     #[clap(short, long)]
     debug: bool,
 
+    /// Config file path
+    #[clap(short, long)]
+    config: Option<std::path::PathBuf>,
+
     /// input device path/name of CEC device
     #[clap(short, long, parse(from_os_str))]
     input: Option<std::path::PathBuf>,
@@ -263,7 +267,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
-    let config_path = resolve_config_path();
+    let config_path = args.config.unwrap_or_else(|| resolve_config_path());
     info!("Resolved config file path: <u>{:?}</>", config_path);
     let dpms_config = CecDpmsConfig::load(config_path.to_str().unwrap_or("")).unwrap_or_else(
         |e| -> CecDpmsConfig {
