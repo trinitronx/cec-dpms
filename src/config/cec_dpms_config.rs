@@ -1,16 +1,33 @@
 /// config: A config module supporting a YAML config file
 use arrayvec::ArrayVec;
 use cec_rs::CecLogicalAddress;
+use libcec_sys::{CEC_DEFAULT_BASE_DEVICE, CEC_DEFAULT_HDMI_PORT, CEC_DEFAULT_PHYSICAL_ADDRESS};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(default, rename_all = "snake_case")]
 pub struct CecDpmsConfig {
     pub hdmi_port: u8,
     base_device: String, // Deserialize as string, convert to enum
     pub activate_source: bool,
     pub physical_address: u16,
     pub device_types: ArrayVec<String, 5>,
+}
+
+impl Default for CecDpmsConfig {
+    fn default() -> Self {
+        CecDpmsConfig {
+            hdmi_port: CEC_DEFAULT_HDMI_PORT as u8, // 1
+            base_device: format!(
+                // "Tv"
+                "{:?}",
+                CecLogicalAddress::from_repr(CEC_DEFAULT_BASE_DEVICE as i32).unwrap()
+            ),
+            activate_source: false,
+            physical_address: CEC_DEFAULT_PHYSICAL_ADDRESS.try_into().unwrap(), // 0x1000
+            device_types: ["PlaybackDevice"].into_iter().map(String::from).collect(), // PlaybackDevice
+        }
+    }
 }
 
 /// CecDpmsConfig implementation
@@ -150,5 +167,17 @@ device_types:
                 .collect(),
         };
         assert_eq!(cec_dpms_config.base_device(), CecLogicalAddress::Tv);
+    }
+
+    #[test]
+    fn test_cec_dpms_config_load_error() {
+        let yaml = r#"
+---
+invalid_config: true
+"#;
+        let expected = CecDpmsConfig::default();
+        let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        // Assert parsed config matches expected
+        assert_eq!(parsed, expected);
     }
 }
