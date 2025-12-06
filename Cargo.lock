@@ -187,6 +187,7 @@ dependencies = [
  "cec-rs",
  "clap",
  "hostname",
+ "libcec-sys",
  "log",
  "serde",
  "serde-saphyr",
@@ -935,9 +936,9 @@ checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
 
 [[package]]
 name = "libcec-sys"
-version = "8.0.0"
+version = "9.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9ff218b03ad6aa23d4a85cef83914ab31d0acc65ddf9e9219b72369065f01393"
+checksum = "78177e03c310ac5c572a3a334f421246f7a2a9e832cb0c6b601453856d1e5271"
 dependencies = [
  "cc",
  "cfg-if",
