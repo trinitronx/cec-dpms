@@ -56,6 +56,7 @@ mod cec_device_types_serde {
     use arrayvec::ArrayVec;
     use cec_rs::CecDeviceType;
     use serde::{de, Deserializer, Serializer};
+    use simplelog::{paris, warn};
     use std::fmt;
 
     /// Serialize `device_types` `ArrayVec<CecDeviceType, 5>` into a sequence of
@@ -118,12 +119,12 @@ mod cec_device_types_serde {
                             "audiosystem" => devices.push(CecDeviceType::AudioSystem),
                             unknown => {
                                 // Log unknown but don't fail - silently skip
-                                eprintln!("Warning: Unknown device type in config: {}", unknown);
+                                warn!("Warning: Unknown device type in config: {}", unknown);
                             }
                         }
                     } else {
                         // Capacity exceeded, silently skip remaining items
-                        eprintln!(
+                        warn!(
                             "Warning: Too many device types in config (max 5), ignoring: {}",
                             device_str
                         );
