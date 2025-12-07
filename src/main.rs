@@ -19,7 +19,9 @@ use cec_rs::{
 use std::sync::atomic::AtomicUsize;
 
 mod config;
-use config::{resolve_config_path, CecDpmsConfig};
+use config::{load_config, resolve_config_path};
+
+use crate::config::{CecDpmsAdapterConfig, CecDpmsRootConfig};
 
 static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -269,24 +271,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     info!("Hostname: <b>{:?}</>", hostname);
     let config_path = args.config.unwrap_or_else(|| resolve_config_path());
     info!("Resolved config file path: <u>{:?}</>", config_path);
-    let dpms_config = CecDpmsConfig::load(config_path.to_str().unwrap_or("")).unwrap_or_else(
-        |e| -> CecDpmsConfig {
-            error!("Error parsing config file: {:?}", e);
-            warn!("Using default values for cec-dpms config");
-            CecDpmsConfig::default()
-        },
-    );
-    info!("Loaded cec-dpms config: {:#?}", dpms_config);
+    let root_config = load_config(config_path.to_str().unwrap_or("")).unwrap_or_else(|e| {
+        error!("Error parsing config file: {:?}", e);
+        warn!("Using default values for cec-dpms config");
+        CecDpmsRootConfig::default()
+    });
+    info!("Loaded root config: {:#?}", root_config);
+
+    let adapter_config: CecDpmsAdapterConfig =
+        root_config.find_adapter(&device_path).unwrap_or_default();
+    info!("Using adapter config: {:#?}", adapter_config);
+
     let cfg = CecConnectionCfgBuilder::default()
         .port(CString::new(device_path)?)
         .device_name(hostname.into())
-        .activate_source(dpms_config.activate_source)
-        .base_device(dpms_config.base_device)
-        .physical_address(dpms_config.physical_address)
-        .hdmi_port(dpms_config.hdmi_port)
+        .activate_source(adapter_config.activate_source)
+        .base_device(adapter_config.base_device)
+        .physical_address(adapter_config.physical_address)
+        .hdmi_port(adapter_config.hdmi_port)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
-        .device_types(cec_rs::CecDeviceTypeVec(dpms_config.device_types))
+        .device_types(cec_rs::CecDeviceTypeVec(adapter_config.device_types))
         .build()
         .unwrap();
     // Setup signal handling flags
