@@ -3,6 +3,7 @@ use arrayvec::ArrayVec;
 use cec_rs::{CecDeviceType, CecLogicalAddress};
 use libcec_sys::{CEC_DEFAULT_BASE_DEVICE, CEC_DEFAULT_HDMI_PORT, CEC_DEFAULT_PHYSICAL_ADDRESS};
 use serde::{Deserialize, Serialize};
+use simplelog::{paris, warn};
 
 mod cec_logical_address_serde {
     use cec_rs::CecLogicalAddress;
@@ -139,9 +140,30 @@ mod cec_device_types_serde {
     }
 }
 
+/// Root configuration structure for all CEC adapters
+///
+/// Supports configuration of one or more CEC adapters, each with its own settings.
+/// The static `adapters` key allows for easy deserialization without dynamic key lookups.
+#[derive(Clone, PartialEq, Serialize, Deserialize, Debug)]
+#[serde(default, rename_all = "snake_case")]
+pub struct CecDpmsRootConfig {
+    /// List of adapter configurations
+    pub adapters: Vec<CecDpmsAdapterConfig>,
+}
+
+impl Default for CecDpmsRootConfig {
+    fn default() -> Self {
+        CecDpmsRootConfig {
+            adapters: vec![CecDpmsAdapterConfig::default()],
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
-pub struct CecDpmsConfig {
+pub struct CecDpmsAdapterConfig {
+    /// The device path for this adapter (e.g., `/dev/ttyACM0` or `/dev/cec0`)
+    pub device: String,
     pub hdmi_port: u8,
     #[serde(with = "cec_logical_address_serde")]
     pub base_device: CecLogicalAddress,
@@ -151,22 +173,24 @@ pub struct CecDpmsConfig {
     pub device_types: ArrayVec<CecDeviceType, 5>,
 }
 
-/// `Default` trait implementation for `CecDpmsConfig`
+/// `Default` trait implementation for `CecDpmsAdapterConfig`
 ///
 /// Defaults to:
 ///
-///     CecDpmsConfig {
+///     CecDpmsAdapterConfig {
+///         device: "",
 ///         hdmi_port: 1,
 ///         base_device: Tv,
-///         activate_source: true,
+///         activate_source: false,
 ///         physical_address: 0x1000,
 ///         device_types: [
 ///             PlaybackDevice,
 ///         ],
 ///     }
-impl Default for CecDpmsConfig {
+impl Default for CecDpmsAdapterConfig {
     fn default() -> Self {
-        CecDpmsConfig {
+        CecDpmsAdapterConfig {
+            device: String::new(),
             hdmi_port: CEC_DEFAULT_HDMI_PORT as u8,
             base_device: CecLogicalAddress::from_repr(CEC_DEFAULT_BASE_DEVICE as i32)
                 .unwrap_or(CecLogicalAddress::Unknown),
@@ -177,32 +201,39 @@ impl Default for CecDpmsConfig {
     }
 }
 
-/// `CecDpmsConfig` implementation
-impl CecDpmsConfig {
-    /// `CecDpmsConfig` file loader
+/// `CecDpmsRootConfig` implementation for multi-adapter configuration
+impl CecDpmsRootConfig {
+    /// Find adapter configuration for a specific device path
     ///
-    /// # Example Config
+    /// # Arguments
     ///
-    ///     hdmi_port: 4
-    ///     base_device: "Tv"
-    ///     activate_source: true
-    ///     physical_address: 0x3000
-    ///     device_types:
-    ///     - RecordingDevice
-    ///     - PlaybackDevice
+    /// * `device_path` - The device path to search for (e.g., `/dev/ttyACM0`)
     ///
-    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let contents = std::fs::read_to_string(path)?;
-        Ok(serde_saphyr::from_str(contents.as_str())?)
+    /// # Returns
+    ///
+    /// The adapter configuration if found, otherwise a default configuration.
+    /// Returns `None` if the device list is empty.
+    pub fn find_adapter(&self, device_path: &str) -> Option<CecDpmsAdapterConfig> {
+        self.adapters
+            .iter()
+            .find(|adapter| adapter.device == device_path)
+            .cloned()
+            .or_else(|| {
+                warn!(
+                    "Device {} not found in config, using default configuration",
+                    device_path
+                );
+                Some(CecDpmsAdapterConfig::default())
+            })
     }
 }
 
-/// `Display` trait implementation for `CecDpmsConfig`
+/// `Display` trait implementation for `CecDpmsAdapterConfig`
 ///
-/// Print the `CecDpmsConfig` contents as a single-line representation.
+/// Print the `CecDpmsAdapterConfig` contents as a single-line representation.
 ///
 /// Notably, print the hexidecimal CEC physical address as a dot-separated string.
-impl std::fmt::Display for CecDpmsConfig {
+impl std::fmt::Display for CecDpmsAdapterConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = self.physical_address;
         let hex_addr = format!(
@@ -215,15 +246,15 @@ impl std::fmt::Display for CecDpmsConfig {
 
         write!(
             f,
-            "CecDpmsConfig {{ hdmi_port: {}, base_device: {:?}, activate_source: {}, physical_address: {} }}",
-            self.hdmi_port, self.base_device, self.activate_source, hex_addr
+            "CecDpmsAdapterConfig {{ device: {}, hdmi_port: {}, base_device: {:?}, activate_source: {}, physical_address: {} }}",
+            self.device, self.hdmi_port, self.base_device, self.activate_source, hex_addr
         )
     }
 }
 
-/// `Debug` trait implementation for `CecDpmsConfig`
+/// `Debug` trait implementation for `CecDpmsAdapterConfig`
 ///
-/// Print the `CecDpmsConfig` contents with more detailed representation of the
+/// Print the `CecDpmsAdapterConfig` contents with more detailed representation of the
 /// internal struct contents.
 ///
 /// Again the hexidecimal CEC physical address is printed as a dot-separated
@@ -231,7 +262,7 @@ impl std::fmt::Display for CecDpmsConfig {
 ///
 /// **Note:** The internal representation is a `u16`, but the common dot-sparated CEC
 /// address notation is used for `Debug` and pretty-print.
-impl std::fmt::Debug for CecDpmsConfig {
+impl std::fmt::Debug for CecDpmsAdapterConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let addr = self.physical_address;
         let hex_addr = format!(
@@ -242,7 +273,8 @@ impl std::fmt::Debug for CecDpmsConfig {
             addr & 0xF
         );
 
-        f.debug_struct("CecDpmsConfig")
+        f.debug_struct("CecDpmsAdapterConfig")
+            .field("device", &self.device)
             .field("hdmi_port", &self.hdmi_port)
             .field("base_device", &format!("{:?}", self.base_device))
             .field("activate_source", &self.activate_source)
@@ -257,7 +289,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_cec_dpms_config_load() {
+    fn test_cec_dpms_adapter_config_deserialize_yaml() {
         let yaml = "hdmi_port: 4\n\
                           base_device: \"Tv\"\n\
                           activate_source: true\n\
@@ -265,7 +297,8 @@ mod test {
                           device_types:\n\
                           - RecordingDevice\n\
                           - PlaybackDevice";
-        let expected = CecDpmsConfig {
+        let expected = CecDpmsAdapterConfig {
+            device: String::new(),
             hdmi_port: 4,
             base_device: CecLogicalAddress::Tv,
             activate_source: true,
@@ -277,13 +310,13 @@ mod test {
             .into_iter()
             .collect(),
         };
-        let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        let parsed: CecDpmsAdapterConfig = serde_saphyr::from_str(yaml).unwrap();
         // Assert parsed config matches expected
         assert_eq!(parsed, expected);
     }
 
     #[test]
-    fn test_cec_dpms_config_base_device_deserialize_case_insensitive() {
+    fn test_cec_dpms_adapter_config_base_device_deserialize_case_insensitive() {
         let test_cases = vec![
             ("tv", CecLogicalAddress::Tv),
             ("TV", CecLogicalAddress::Tv),
@@ -297,13 +330,13 @@ mod test {
 
         for (input, expected) in test_cases {
             let yaml = format!("base_device: \"{}\"", input);
-            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            let config: CecDpmsAdapterConfig = serde_saphyr::from_str(&yaml).unwrap();
             assert_eq!(config.base_device, expected, "Failed for input: {}", input);
         }
     }
 
     #[test]
-    fn test_cec_dpms_config_base_device_deserialize() {
+    fn test_cec_dpms_adapter_config_base_device_deserialize() {
         let test_cases = vec![
             ("tv", CecLogicalAddress::Tv),
             ("recordingdevice1", CecLogicalAddress::Recordingdevice1),
@@ -326,13 +359,13 @@ mod test {
 
         for (input, expected) in test_cases {
             let yaml = format!("base_device: \"{}\"", input);
-            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            let config: CecDpmsAdapterConfig = serde_saphyr::from_str(&yaml).unwrap();
             assert_eq!(config.base_device, expected, "Failed for input: {}", input);
         }
     }
 
     #[test]
-    fn test_cec_dpms_config_device_types_deserialize_case_insensitive() {
+    fn test_cec_dpms_adapter_config_device_types_deserialize_case_insensitive() {
         let test_cases = vec![
             ("tv", CecDeviceType::Tv),
             ("TV", CecDeviceType::Tv),
@@ -354,7 +387,7 @@ mod test {
 
         for (input, expected) in test_cases {
             let yaml = format!("device_types:\n  - \"{}\"", input);
-            let config: CecDpmsConfig = serde_saphyr::from_str(&yaml).unwrap();
+            let config: CecDpmsAdapterConfig = serde_saphyr::from_str(&yaml).unwrap();
             assert!(
                 config.device_types.contains(&expected),
                 "Failed for input: {} (expected {:?})",
@@ -365,13 +398,13 @@ mod test {
     }
 
     #[test]
-    fn test_cec_dpms_config_device_types_deserialize_multiple() {
+    fn test_cec_dpms_adapter_config_device_types_deserialize_multiple() {
         let yaml = "device_types:\n\
                           - PlaybackDevice\n\
                           - RecordingDevice\n\
                           - Tuner\n\
                           - AudioSystem";
-        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        let config: CecDpmsAdapterConfig = serde_saphyr::from_str(yaml).unwrap();
         assert_eq!(config.device_types.len(), 4);
         assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
         assert_eq!(config.device_types[1], CecDeviceType::RecordingDevice);
@@ -380,14 +413,14 @@ mod test {
     }
 
     #[test]
-    fn test_cec_dpms_config_device_types_deserialize_unknown_skipped() {
+    fn test_cec_dpms_adapter_config_device_types_deserialize_unknown_skipped() {
         let yaml = "device_types:\n\
                           - PlaybackDevice\n\
                           - InvalidDevice\n\
                           - Tuner\n\
                           - UnknownType\n\
                           - AudioSystem";
-        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        let config: CecDpmsAdapterConfig = serde_saphyr::from_str(yaml).unwrap();
         // Unknown values are skipped, so we should only have 3 valid types
         assert_eq!(config.device_types.len(), 3);
         assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
@@ -396,7 +429,7 @@ mod test {
     }
 
     #[test]
-    fn test_cec_dpms_config_device_types_deserialize_capacity_limit() {
+    fn test_cec_dpms_adapter_config_device_types_deserialize_capacity_limit() {
         // Test with more items than capacity (max 5)
         let yaml = "device_types:\n\
                           - PlaybackDevice\n\
@@ -405,7 +438,7 @@ mod test {
                           - AudioSystem\n\
                           - Reserved\n\
                           - Tv\n";
-        let config: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        let config: CecDpmsAdapterConfig = serde_saphyr::from_str(yaml).unwrap();
         // Should only contain the first 5 items, silently skipping overflow
         assert_eq!(config.device_types.len(), 5);
         assert_eq!(config.device_types[0], CecDeviceType::PlaybackDevice);
@@ -416,12 +449,90 @@ mod test {
     }
 
     #[test]
-    fn test_cec_dpms_config_load_error() {
+    fn test_cec_dpms_adapter_config_deserialize_yaml_error() {
         let yaml = "---\n\
                           invalid_config: true";
-        let expected = CecDpmsConfig::default();
-        let parsed: CecDpmsConfig = serde_saphyr::from_str(yaml).unwrap();
+        let expected = CecDpmsAdapterConfig::default();
+        let parsed: CecDpmsAdapterConfig = serde_saphyr::from_str(yaml).unwrap();
         // Assert parsed config matches expected
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_cec_dpms_root_config_deserialize_yaml() {
+        let yaml = r#"adapters:
+  - device: /dev/ttyACM0
+    hdmi_port: 4
+    base_device: "Tv"
+    activate_source: true
+    physical_address: 0x3000
+    device_types:
+    - RecordingDevice
+    - PlaybackDevice
+  - device: /dev/cec0
+    hdmi_port: 1
+    base_device: "Tv"
+    activate_source: false
+    physical_address: 0x1000
+    device_types:
+    - PlaybackDevice"#;
+        let parsed: CecDpmsRootConfig = serde_saphyr::from_str(yaml).unwrap();
+        assert_eq!(parsed.adapters.len(), 2);
+        assert_eq!(parsed.adapters[0].device, "/dev/ttyACM0");
+        assert_eq!(parsed.adapters[0].hdmi_port, 4);
+        assert_eq!(parsed.adapters[0].activate_source, true);
+        assert_eq!(parsed.adapters[1].device, "/dev/cec0");
+        assert_eq!(parsed.adapters[1].hdmi_port, 1);
+        assert_eq!(parsed.adapters[1].activate_source, false);
+    }
+
+    #[test]
+    fn test_cec_dpms_root_config_find_adapter_by_device() {
+        let yaml = r#"adapters:
+  - device: /dev/ttyACM0
+    hdmi_port: 4
+    base_device: "Tv"
+    activate_source: true
+    physical_address: 0x3000
+    device_types:
+    - RecordingDevice
+  - device: /dev/cec0
+    hdmi_port: 1
+    base_device: "Tv"
+    activate_source: false
+    physical_address: 0x1000
+    device_types:
+    - PlaybackDevice"#;
+        let root_config: CecDpmsRootConfig = serde_saphyr::from_str(yaml).unwrap();
+
+        // Test finding first adapter
+        let adapter1 = root_config.find_adapter("/dev/ttyACM0");
+        assert!(adapter1.is_some());
+        let config1 = adapter1.unwrap();
+        assert_eq!(config1.hdmi_port, 4);
+        assert_eq!(config1.activate_source, true);
+        assert_eq!(config1.physical_address, 0x3000);
+
+        // Test finding second adapter
+        let adapter2 = root_config.find_adapter("/dev/cec0");
+        assert!(adapter2.is_some());
+        let config2 = adapter2.unwrap();
+        assert_eq!(config2.hdmi_port, 1);
+        assert_eq!(config2.activate_source, false);
+        assert_eq!(config2.physical_address, 0x1000);
+    }
+
+    #[test]
+    fn test_cec_dpms_root_config_find_adapter_not_found() {
+        let yaml = r#"adapters:
+  - device: /dev/ttyACM0
+    hdmi_port: 4"#;
+        let root_config: CecDpmsRootConfig = serde_saphyr::from_str(yaml).unwrap();
+
+        // Test finding non-existent adapter returns default
+        let adapter = root_config.find_adapter("/dev/nonexistent");
+        assert!(adapter.is_some());
+        let config = adapter.unwrap();
+        assert_eq!(config, CecDpmsAdapterConfig::default());
     }
 }

@@ -1,9 +1,9 @@
 //! Configuration file loading utilities
 //!
-//! Handles file path resolution and config file loading/parsing.
+//! Handles file path resolution and root config file loading/parsing.
 //! Follows XDG Base Directory Specification for config file location.
 
-use super::cec_dpms_config::CecDpmsConfig;
+use super::cec_dpms_config::CecDpmsRootConfig;
 use directories::ProjectDirs;
 use simplelog::{paris, warn};
 use std::path::Path;
@@ -75,17 +75,17 @@ pub fn resolve_config_path() -> std::path::PathBuf {
 ///
 /// # Returns
 ///
-/// Returns a `CecDpmsConfig` containing cec-dpms configuration,
+/// Returns a `CecDpmsRootConfig` containing all adapter configurations,
 /// or an error if file reading or parsing fails.
 ///
 /// # Example
 ///
 /// ```ignore
 /// let config_path = resolve_config_path();
-/// let config = load_config(config_path.to_str().unwrap_or(""))?;
-/// let adapter = config.find_adapter("/dev/ttyACM0")?;
+/// let root_config = load_config(config_path.to_str().unwrap_or(""))?;
+/// let adapter = root_config.find_adapter("/dev/ttyACM0")?;
 /// ```
-pub fn load_config(path: &str) -> Result<CecDpmsConfig, Box<dyn std::error::Error>> {
+pub fn load_config(path: &str) -> Result<CecDpmsRootConfig, Box<dyn std::error::Error>> {
     let contents = std::fs::read_to_string(path)?;
     Ok(serde_saphyr::from_str(contents.as_str())?)
 }
