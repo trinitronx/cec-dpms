@@ -211,7 +211,9 @@ impl CecDpmsRootConfig {
     ///
     /// # Returns
     ///
-    /// The adapter configuration if found, otherwise a default configuration.
+    /// The adapter configuration if found, otherwise a default configuration
+    /// with `device` set to `device_path`.
+    ///
     /// Returns `None` if the device list is empty.
     pub fn find_adapter(&self, device_path: &str) -> Option<CecDpmsAdapterConfig> {
         self.adapters
@@ -223,7 +225,10 @@ impl CecDpmsRootConfig {
                     "Device {} not found in config, using default configuration",
                     device_path
                 );
-                Some(CecDpmsAdapterConfig::default())
+                Some(CecDpmsAdapterConfig {
+                    device: device_path.into(),
+                    ..Default::default()
+                })
             })
     }
 }
@@ -533,6 +538,12 @@ mod test {
         let adapter = root_config.find_adapter("/dev/nonexistent");
         assert!(adapter.is_some());
         let config = adapter.unwrap();
-        assert_eq!(config, CecDpmsAdapterConfig::default());
+        assert_eq!(
+            config,
+            CecDpmsAdapterConfig {
+                device: "/dev/nonexistent".into(),
+                ..Default::default()
+            }
+        );
     }
 }
