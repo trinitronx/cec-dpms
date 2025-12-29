@@ -286,6 +286,24 @@ fn attempt_reconnect(
     cfg_hdmi_port: u8,
     cfg_device_types: ArrayVec<cec_rs::CecDeviceType, 5>,
 ) -> Option<Arc<CecConnection>> {
+    // Avoid TOCTOU race for failure count
+    let failure_count = TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed);
+    if failure_count < FAILURE_THRESHOLD {
+        // No need to reconnect yet
+        return None;
+    } else if failure_count > FAILURE_THRESHOLD {
+        // Already attempted reconnection over threshold
+        // Always log latest failure count info to refect current state
+        warn!(
+            "Transmission failure threshold exceeded: {}/{}",
+            TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed),
+            FAILURE_THRESHOLD
+        );
+        warn!("Reconnect of CEC adapter after communication failure already attempted");
+        error!("Last reconnection attempt may have failed, and it's unlikely that it will recover on its own.");
+        error!("Check CEC adapter physical connection, device power and TV status");
+        error!("Have you tried turning it off and on again? 🔌🤷");
+    }
     warn!("Attempting to reconnect CEC adapter after communication failure...");
 
     // Drop the old connection by replacing it
