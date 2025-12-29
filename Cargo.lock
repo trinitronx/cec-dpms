@@ -188,6 +188,7 @@ dependencies = [
  "clap",
  "directories",
  "hostname",
+ "lazy_static",
  "libcec-sys",
  "log",
  "serde",
