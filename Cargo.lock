@@ -191,6 +191,7 @@ dependencies = [
  "lazy_static",
  "libcec-sys",
  "log",
+ "sd-notify",
  "serde",
  "serde-saphyr",
  "signal-hook",
@@ -1432,6 +1433,15 @@ checksum = "4fb771b59f6b1985d1406325ec28f97cfb14256abcec4fdfb37b36a1766d6af7"
 dependencies = [
  "arraydeque",
  "hashlink",
+]
+
+[[package]]
+name = "sd-notify"
+version = "0.4.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b943eadf71d8b69e661330cb0e2656e31040acf21ee7708e2c238a0ec6af2bf4"
+dependencies = [
+ "libc",
 ]
 
 [[package]]
