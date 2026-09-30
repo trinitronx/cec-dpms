@@ -162,6 +162,7 @@ impl Default for CecDpmsRootConfig {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "snake_case")]
 pub struct CecDpmsAdapterConfig {
+    pub device_name: String,
     /// The device path for this adapter (e.g., `/dev/ttyACM0` or `/dev/cec0`)
     pub device: String,
     pub hdmi_port: u8,
