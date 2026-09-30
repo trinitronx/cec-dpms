@@ -1,12 +1,13 @@
 use clap::Parser;
 use hostname;
+use lazy_static::lazy_static;
 use signal_hook::{consts::SIGINT, consts::SIGTERM, consts::SIGUSR1, consts::SIGUSR2};
 use simplelog::*;
 use std::cell::RefCell;
 use std::error::Error;
 use std::ffi::CString;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::{thread, time};
 
 use arrayvec::ArrayVec;
@@ -256,6 +257,88 @@ thread_local! {
     static THREAD_CONNECTION: RefCell<Option<Arc<CecConnection>>> = RefCell::new(None);
 }
 
+// Track consecutive transmission failures for health monitoring
+static TRANSMISSION_FAILURE_COUNT: AtomicUsize = AtomicUsize::new(0);
+const FAILURE_THRESHOLD: usize = 5; // Reconnect after 5 consecutive failures
+
+// Store connection config for reconnection attempts
+lazy_static! {
+    static ref CONNECTION_CONFIG: Mutex<
+        Option<(
+            CString,
+            String,
+            bool,
+            cec_rs::CecLogicalAddress,
+            u16,
+            u8,
+            ArrayVec<cec_rs::CecDeviceType, 5>,
+        )>,
+    > = Mutex::new(None);
+}
+
+/// Attempt to reconnect the CEC adapter after communication failure
+fn attempt_reconnect(
+    cfg_port: &CString,
+    cfg_device_name: String,
+    cfg_activate_source: bool,
+    cfg_base_device: cec_rs::CecLogicalAddress,
+    cfg_physical_address: u16,
+    cfg_hdmi_port: u8,
+    cfg_device_types: ArrayVec<cec_rs::CecDeviceType, 5>,
+) -> Option<Arc<CecConnection>> {
+    // Avoid TOCTOU race for failure count
+    let failure_count = TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed);
+    if failure_count < FAILURE_THRESHOLD {
+        // No need to reconnect yet
+        return None;
+    } else if failure_count > FAILURE_THRESHOLD {
+        // Already attempted reconnection over threshold
+        // Always log latest failure count info to refect current state
+        warn!(
+            "Transmission failure threshold exceeded: {}/{}",
+            TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed),
+            FAILURE_THRESHOLD
+        );
+        warn!("Reconnect of CEC adapter after communication failure already attempted");
+        error!("Last reconnection attempt may have failed, and it's unlikely that it will recover on its own.");
+        error!("Check CEC adapter physical connection, device power and TV status");
+        error!("Have you tried turning it off and on again? 🔌🤷");
+    }
+    warn!("Attempting to reconnect CEC adapter after communication failure...");
+
+    // Drop the old connection by replacing it
+    let new_cfg = CecConnectionCfgBuilder::default()
+        .port(cfg_port.clone())
+        .device_name(cfg_device_name)
+        .activate_source(cfg_activate_source)
+        .base_device(cfg_base_device)
+        .physical_address(cfg_physical_address)
+        .hdmi_port(cfg_hdmi_port)
+        .command_received_callback(Box::new(on_command_received))
+        .log_message_callback(Box::new(on_log_message))
+        .device_types(cec_rs::CecDeviceTypeVec(cfg_device_types))
+        .build();
+
+    match new_cfg {
+        Ok(cfg) => match cfg.open() {
+            Ok(new_conn) => {
+                let new_connection = Arc::new(new_conn);
+                info!("Successfully reconnected CEC adapter");
+                TRANSMISSION_FAILURE_COUNT.store(0, Ordering::Relaxed);
+                Some(new_connection)
+            }
+            Err(e) => {
+                error!("Failed to reopen CEC connection: {:?}", e);
+                None
+            }
+        },
+        Err(e) => {
+            error!("Failed to build CEC connection config: {:?}", e);
+            None
+        }
+    }
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     let old_thread_count = GLOBAL_THREAD_COUNT.fetch_add(1, Ordering::Relaxed);
     debug!("live threads at start of main(): {}", old_thread_count + 1);
@@ -266,6 +349,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         "🔘 <b>cec-dpms</> started, about to open CEC connection to: <u>{}</>",
         &device_path
     );
+
+    // Track if we're exiting due to a fatal failure
+    let exit_failure = Arc::new(AtomicBool::new(false));
+    let exit_failure_clone = Arc::clone(&exit_failure);
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
@@ -282,22 +369,39 @@ fn main() -> Result<(), Box<dyn Error>> {
         root_config.find_adapter(&device_path).unwrap_or_default();
     info!("Using adapter config: {:#?}", adapter_config);
 
+    let device_path_cstring = CString::new(device_path)?;
     let cfg = CecConnectionCfgBuilder::default()
-        .port(CString::new(device_path)?)
-        .device_name(hostname.into())
+        .port(device_path_cstring.clone())
+        .device_name(hostname.clone())
         .activate_source(adapter_config.activate_source)
         .base_device(adapter_config.base_device)
         .physical_address(adapter_config.physical_address)
         .hdmi_port(adapter_config.hdmi_port)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
-        .device_types(cec_rs::CecDeviceTypeVec(adapter_config.device_types))
+        .device_types(cec_rs::CecDeviceTypeVec(
+            adapter_config.device_types.clone(),
+        ))
         .build()
         .unwrap();
+
+    // Store config for potential reconnection attempts
+    if let Ok(mut config_lock) = CONNECTION_CONFIG.lock() {
+        *config_lock = Some((
+            device_path_cstring.clone(),
+            hostname.clone(),
+            adapter_config.activate_source,
+            adapter_config.base_device,
+            adapter_config.physical_address,
+            adapter_config.hdmi_port,
+            adapter_config.device_types.clone(),
+        ));
+    }
     // Setup signal handling flags
     let usr1 = Arc::new(AtomicBool::new(false));
     let usr2 = Arc::new(AtomicBool::new(false));
     let terminate = Arc::new(AtomicBool::new(false));
+    let reconnect_needed = Arc::new(AtomicBool::new(false));
     signal_hook::flag::register(SIGUSR1, Arc::clone(&usr1))?;
     signal_hook::flag::register(SIGUSR2, Arc::clone(&usr2))?;
     signal_hook::flag::register(SIGTERM, Arc::clone(&terminate))?;
@@ -341,8 +445,81 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let last_thread_count = &GLOBAL_THREAD_COUNT.load(Ordering::Relaxed);
     debug!("live threads at start of main(): {}", last_thread_count);
+
+    // Spawn a reconnection worker thread that runs independently from the main loop
+    // This ensures that blocking libcec reconnection attempts don't prevent SIGTERM response
+    let reconnect_flag_clone = Arc::clone(&reconnect_needed);
+    let terminate_flag_clone = Arc::clone(&terminate);
+    let exit_failure_worker_clone = Arc::clone(&exit_failure_clone);
+    let reconnect_thread = thread::spawn(move || {
+        debug!("Reconnection worker thread started");
+        loop {
+            // Check if we should exit
+            if terminate_flag_clone.load(Ordering::Relaxed) {
+                debug!("Reconnection worker thread received terminate signal, exiting");
+                break;
+            }
+
+            // Check if reconnection is needed
+            if reconnect_flag_clone.load(Ordering::Relaxed) {
+                reconnect_flag_clone.store(false, Ordering::Relaxed);
+                debug!("Reconnection worker: Attempting reconnection");
+
+                if let Ok(config_lock) = CONNECTION_CONFIG.lock() {
+                    if let Some((port, name, activate, base, phys, hdmi, types)) =
+                        config_lock.as_ref()
+                    {
+                        match attempt_reconnect(
+                            port,
+                            name.clone(),
+                            *activate,
+                            *base,
+                            *phys,
+                            *hdmi,
+                            types.clone(),
+                        ) {
+                            Some(new_conn) => {
+                                debug!("Reconnection worker: Successfully reconnected");
+                                THREAD_CONNECTION.with(|conn| {
+                                    *conn.borrow_mut() = Some(new_conn.clone());
+                                });
+                                let _ = CONNECTION.set(Some(new_conn));
+                            }
+                            None => {
+                                let failure_count =
+                                    TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed);
+                                error!("Reconnection worker: Reconnection failed after {} consecutive transmission failures", failure_count);
+                                if failure_count > FAILURE_THRESHOLD {
+                                    notify_systemd_failure(&format!(
+                                        "Failed to reconnect after {} failed transmissions",
+                                        failure_count
+                                    ));
+                                    // notify_systemd_failure() sends NotifyState::Stopping, which tells systemd
+                                    // we're beginning shutdown. Trigger graceful shutdown by setting terminate flag.
+                                    exit_failure_worker_clone.store(true, Ordering::Relaxed);
+                                    terminate_flag_clone.store(true, Ordering::Relaxed);
+                                    debug!("Reconnection worker: Unrecoverable failure - initiating graceful shutdown");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Small sleep to avoid busy-looping
+            thread::sleep(time::Duration::from_millis(100));
+        }
+        debug!("Reconnection worker thread exiting");
+    });
+
     info!("Waiting for signals...");
     loop {
+        // Check for termination signal before processing any handlers
+        if terminate.load(Ordering::Relaxed) {
+            debug!("Terminate signal detected at loop start, breaking early");
+            break;
+        }
+
         if usr1.load(Ordering::Relaxed) {
             info!("<b><green>USR1</>: powering <b>ON</>");
             let last_thread_count = &GLOBAL_THREAD_COUNT.load(Ordering::Relaxed);
@@ -352,19 +529,37 @@ fn main() -> Result<(), Box<dyn Error>> {
             // let _ = connection.send_power_on_devices(CecLogicalAddress::Tv);
             let _res = THREAD_CONNECTION.with(|conn| {
                 if let Some(connection) = conn.borrow().as_ref() {
+                    // Check for termination signal during handler execution
+                    if terminate.load(Ordering::Relaxed) {
+                        debug!("Terminate signal detected in USR1 handler, aborting");
+                        return Ok(()) as Result<(), Box<dyn Error>>;
+                    }
                     let power_on_devices_result =
                         connection.send_power_on_devices(CecLogicalAddress::Tv);
                     match power_on_devices_result {
                         Ok(()) => {
                             info!("<b><green>Success!</> Sent power on command to Tv");
+                            TRANSMISSION_FAILURE_COUNT.store(0, Ordering::Relaxed);
                         }
                         Err(e) => {
                             error!(
                                 "<b><red>Error:</> Failed to send power on devices command! {:?}",
                                 e
                             );
+                            let failure_count = TRANSMISSION_FAILURE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+                            warn!("Transmission failure count: {}/{}", failure_count, FAILURE_THRESHOLD);
+                            if failure_count >= FAILURE_THRESHOLD {
+                                warn!("Transmission failure threshold reached, signaling reconnection worker...");
+                                reconnect_needed.store(true, Ordering::Relaxed);
+                            }
                         }
                     }
+                    // Check for termination signal before continuing
+                    if terminate.load(Ordering::Relaxed) {
+                        debug!("Terminate signal detected after power on check, aborting");
+                        return Ok(()) as Result<(), Box<dyn Error>>;
+                    }
+
                     info!("Active source: <b>{:?}</>", connection.get_active_source());
                     // Do not change active source if Tv reports another source is active
                     // In other words: user viewing preference overrides, and
@@ -372,15 +567,28 @@ fn main() -> Result<(), Box<dyn Error>> {
                     // deactivate another source
                     //the following call is working the same on my samsung, idk what is more proper:
                     if is_adapter_active_source(connection) {
+                        // Check for termination signal before set_active_source
+                        if terminate.load(Ordering::Relaxed) {
+                            debug!("Terminate signal detected before set_active_source, aborting");
+                            return Ok(()) as Result<(), Box<dyn Error>>;
+                        }
+
                         let set_active_source_result: Result<(), cec_rs::CecConnectionResultError> =
                             connection
                                 .set_active_source(get_primary_address(connection).try_into()?);
                         match set_active_source_result {
                             Ok(o) => {
                                 info!("<b><green>Success!</> Set active source {:?}", o);
+                                TRANSMISSION_FAILURE_COUNT.store(0, Ordering::Relaxed);
                             }
                             Err(e) => {
                                 error!("<b><red>Error:</> Failed to set active source {:?}!", e);
+                                let failure_count = TRANSMISSION_FAILURE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+                                warn!("Transmission failure count: {}/{}", failure_count, FAILURE_THRESHOLD);
+                                if failure_count >= FAILURE_THRESHOLD {
+                                    warn!("Transmission failure threshold reached, signaling reconnection worker...");
+                                    reconnect_needed.store(true, Ordering::Relaxed);
+                                }
                             }
                         }
                     } else {
@@ -415,12 +623,38 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Get mutable access to the thread_local RefCell contents and set it
                 // *conn.borrow_mut() = cfg.open().ok();
                 if let Some(connection) = conn.borrow().as_ref() {
+                    // Check for termination signal during handler execution
+                    if terminate.load(Ordering::Relaxed) {
+                        debug!("Terminate signal detected in USR2 handler, aborting");
+                        return Ok(()) as Result<(), Box<dyn Error>>;
+                    }
+
                     info!(
                         "<b><green>Active source:</> <b>{:?}</>",
                         connection.get_active_source()
                     );
                     if is_adapter_active_source(connection) {
-                        let _ = connection.send_standby_devices(CecLogicalAddress::Tv);
+                        // Check for termination signal before standby attempt
+                        if terminate.load(Ordering::Relaxed) {
+                            debug!("Terminate signal detected before standby, aborting");
+                            return Ok(()) as Result<(), Box<dyn Error>>;
+                        }
+                        let standby_result = connection.send_standby_devices(CecLogicalAddress::Tv);
+                        match standby_result {
+                            Ok(()) => {
+                                info!("<b><green>Success!</> Sent standby command to Tv");
+                                TRANSMISSION_FAILURE_COUNT.store(0, Ordering::Relaxed);
+                            }
+                            Err(e) => {
+                                error!("<b><red>Error:</> Failed to send standby command! {:?}", e);
+                                let failure_count = TRANSMISSION_FAILURE_COUNT.fetch_add(1, Ordering::Relaxed) + 1;
+                                warn!("Transmission failure count: {}/{}", failure_count, FAILURE_THRESHOLD);
+                                if failure_count >= FAILURE_THRESHOLD {
+                                    warn!("Transmission failure threshold reached, signaling reconnection worker...");
+                                    reconnect_needed.store(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
                     } else {
                         info!("<i>request ignored</>: we are not an active source");
                     }
@@ -433,12 +667,30 @@ fn main() -> Result<(), Box<dyn Error>> {
             })?;
         }
         if terminate.load(Ordering::Relaxed) {
-            info!("Terminating");
+            info!("<b><yellow>SIGTERM/SIGINT received, shutting down gracefully...</>");
+            notify_systemd_stopping();
             break;
         }
+
+        // Sleep in 1s increment to respond to signals.
+        // This ensures we check the terminate flag at least every 1s.
+        // We also avoid busy-waiting in the main thread to save energy and CPU
+        // cycles.
+        // This value plus the sleep duration in sd_notify_failure() should be
+        // less than SystemD's 20 second TimeoutStopSec to ensure graceful
+        // shutdown completes in time.
         thread::sleep(time::Duration::from_secs(1));
     }
-    Ok(()) as Result<(), Box<dyn Error>>
 
-    // Ok(())
+    // Wait for worker thread to finish
+    let _ = reconnect_thread.join();
+
+    info!("<b><yellow>Service shutdown complete</>");
+
+    // Return error if we exited due to failure (Rust automatically exits with code 1)
+    if exit_failure.load(Ordering::Relaxed) {
+        Err("CEC adapter communication failure - unrecoverable".into())
+    } else {
+        Ok(())
+    }
 }

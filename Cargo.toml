@@ -25,3 +25,4 @@ serde = { version = "1.0", features = ["derive"] }
 serde-saphyr = "0.0.10"
 libcec-sys = "^9.0.3"
 directories = "6.0"
+lazy_static = "1.4"
