@@ -40,9 +40,33 @@ exec swayidle \
        resume 'sudo pkill -USR1 cec-dpms'
 ```
 
-## systemd integration
+## Building
+
+### Quick Start
+```bash
+# Default build (no systemd integration)
+cargo build --release
+
+# With systemd support (optional)
+cargo build --release --features systemd
+```
+
+See [BUILDING.md](BUILDING.md) for detailed build instructions and feature information.
+
+## systemd Integration
+
+The service can optionally integrate with systemd via the `sd-notify` protocol. This feature is:
+- **Optional** - build with `--features systemd` to enable
+- **Graceful** - works on both systemd and non-systemd systems
+- **Status-aware** - reports ready state and failure conditions
+
 A sample service file for systemd is here:<br>
 [systemd/cec-dpms.service](https://github.com/manio/cec-dpms/blob/master/systemd/cec-dpms.service)<br>
 You need to adjust it for your needs (eg. check the binary path).<br>
 After placing the unit file in correct location and reloading systemd, the unit can be started as usual:<br>
 `systemctl start cec-dpms.service`<br>
+
+For detailed systemd integration documentation, see:
+- [SystemD_Integration.md](SystemD_Integration.md) - SystemD configuration and monitoring
+- [Graceful_Shutdown.md](Graceful_Shutdown.md) - Graceful shutdown with `systemd-notify`
+- [Signal_Responsiveness.md](Signal_Responsiveness.md) - Signal handling during long operations

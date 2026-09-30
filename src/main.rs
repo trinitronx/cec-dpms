@@ -1,6 +1,8 @@
 use clap::Parser;
 use hostname;
 use lazy_static::lazy_static;
+#[cfg(feature = "systemd")]
+use sd_notify::NotifyState;
 use signal_hook::{consts::SIGINT, consts::SIGTERM, consts::SIGUSR1, consts::SIGUSR2};
 use simplelog::*;
 use std::cell::RefCell;
@@ -276,7 +278,96 @@ lazy_static! {
     > = Mutex::new(None);
 }
 
+/// Notify systemd that the service is ready
+///
+/// Sends a `READY=1` notification to systemd.
+#[cfg(feature = "systemd")]
+fn notify_systemd_ready() {
+    match sd_notify::notify(false, &[NotifyState::Ready]) {
+        Ok(_) => {
+            debug!("systemd: Service ready notification sent");
+        }
+        Err(e) => {
+            debug!("systemd: Failed to send ready notification: {:?}", e);
+        }
+    }
+}
+
+/// No-op implementation when systemd feature is disabled
+///
+/// Logs a debug message that a ready notification would have been sent.
+#[cfg(not(feature = "systemd"))]
+fn notify_systemd_ready() {
+    debug!("systemd feature disabled, skipping ready notification");
+}
+
+/// Notify systemd of service failure/unhealthy state
+///
+/// Sends a status message and a `STOPPING=1` notification to systemd,
+/// then sleeps for 5 seconds to allow time for the message to be seen.
+#[cfg(feature = "systemd")]
+fn notify_systemd_failure(msg: &str) {
+    match sd_notify::notify(
+        false,
+        &[
+            NotifyState::Status(&format!("CEC adapter communication failure: {}", msg)),
+            NotifyState::Stopping,
+        ],
+    ) {
+        Ok(_) => {
+            warn!("systemd: Service failure notification sent: {}", msg);
+        }
+        Err(e) => {
+            warn!("systemd: Failed to send failure notification: {:?}", e);
+        }
+    }
+    // Sleep less than SystemD's 20 second TimeoutStopSec, but long enough to
+    // allow any SystemD stop status messages to be seen and read. This value
+    // plus the sleep duration in main() should be less than TimeoutStopSec to
+    // ensure graceful shutdown.
+    thread::sleep(time::Duration::from_secs(5));
+}
+
+/// No-op implementation when systemd feature is disabled
+///
+/// Logs a warning that a failure notification would have been sent.
+#[cfg(not(feature = "systemd"))]
+fn notify_systemd_failure(msg: &str) {
+    warn!(
+        "systemd feature disabled, would have notified failure: {}",
+        msg
+    );
+}
+
+/// Notify systemd that the service is shutting down gracefully
+///
+/// Sends a `STOPPING=1` notification to systemd.
+#[cfg(feature = "systemd")]
+fn notify_systemd_stopping() {
+    match sd_notify::notify(false, &[NotifyState::Stopping]) {
+        Ok(_) => {
+            debug!("systemd: Service stopping notification sent");
+        }
+        Err(e) => {
+            debug!("systemd: Failed to send stopping notification: {:?}", e);
+        }
+    }
+}
+
+/// No-op implementation when systemd feature is disabled
+///
+/// Logs a debug message that a stopping notification would have been sent.
+#[cfg(not(feature = "systemd"))]
+fn notify_systemd_stopping() {
+    debug!("systemd feature disabled, skipping stopping notification");
+}
+
 /// Attempt to reconnect the CEC adapter after communication failure
+///
+/// Takes the original connection configuration parameters as arguments.
+///
+/// Returns `Some(Arc<CecConnection>)` if reconnection was successful,
+/// or `None` if reconnection was not attempted or failed.
 fn attempt_reconnect(
     cfg_port: &CString,
     cfg_device_name: String,
@@ -286,7 +377,7 @@ fn attempt_reconnect(
     cfg_hdmi_port: u8,
     cfg_device_types: ArrayVec<cec_rs::CecDeviceType, 5>,
 ) -> Option<Arc<CecConnection>> {
-    // Avoid TOCTOU race for failure count
+    // Check var once tp avoid TOCTOU conditional race for failure count
     let failure_count = TRANSMISSION_FAILURE_COUNT.load(Ordering::Relaxed);
     if failure_count < FAILURE_THRESHOLD {
         // No need to reconnect yet
@@ -303,6 +394,10 @@ fn attempt_reconnect(
         error!("Last reconnection attempt may have failed, and it's unlikely that it will recover on its own.");
         error!("Check CEC adapter physical connection, device power and TV status");
         error!("Have you tried turning it off and on again? 🔌🤷");
+        // After notifying systemd of failure with NotifyState::Stopping, we're
+        // in a graceful shutdown sequence. The reconnection worker thread will
+        // set the terminate flag to exit cleanly.
+        return None;
     }
     warn!("Attempting to reconnect CEC adapter after communication failure...");
 
@@ -435,6 +530,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 is_adapter_active_source(&conn)
             );
             info!("Active source: <b>{:?}</>", conn.get_active_source());
+            // Notify systemd that we're ready to serve requests
+            notify_systemd_ready();
             Ok(()) as Result<(), Box<dyn Error>>
         })
         .unwrap_or_else(|| {
