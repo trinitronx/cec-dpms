@@ -12,11 +12,16 @@ use std::{thread, time};
 use arrayvec::ArrayVec;
 extern crate cec_rs;
 use cec_rs::{
-    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecDeviceType,
-    CecDeviceTypeVec, CecLogMessage, CecLogicalAddress, CecOpcode,
+    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDatapacket, CecLogMessage,
+    CecLogicalAddress, CecOpcode,
 };
 
 use std::sync::atomic::AtomicUsize;
+
+mod config;
+use config::{load_config, resolve_config_path};
+
+use crate::config::{CecDpmsAdapterConfig, CecDpmsRootConfig};
 
 static GLOBAL_THREAD_COUNT: AtomicUsize = AtomicUsize::new(0);
 
@@ -26,6 +31,10 @@ struct Args {
     /// Enable debug info
     #[clap(short, long)]
     debug: bool,
+
+    /// Config file path
+    #[clap(short, long)]
+    config: Option<std::path::PathBuf>,
 
     /// input device path/name of CEC device
     #[clap(short, long, parse(from_os_str))]
@@ -260,21 +269,29 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let hostname = get_osd_hostname();
     info!("Hostname: <b>{:?}</>", hostname);
-    let mut my_devices = ArrayVec::new();
-    my_devices.push(CecDeviceType::PlaybackDevice);
+    let config_path = args.config.unwrap_or_else(|| resolve_config_path());
+    info!("Resolved config file path: <u>{:?}</>", config_path);
+    let root_config = load_config(config_path.to_str().unwrap_or("")).unwrap_or_else(|e| {
+        error!("Error parsing config file: {:?}", e);
+        warn!("Using default values for cec-dpms config");
+        CecDpmsRootConfig::default()
+    });
+    info!("Loaded root config: {:#?}", root_config);
+
+    let adapter_config: CecDpmsAdapterConfig =
+        root_config.find_adapter(&device_path).unwrap_or_default();
+    info!("Using adapter config: {:#?}", adapter_config);
+
     let cfg = CecConnectionCfgBuilder::default()
         .port(CString::new(device_path)?)
         .device_name(hostname.into())
-        .activate_source(true)
-        // .base_device(CecLogicalAddress::Unknown)
-        .base_device(CecLogicalAddress::Tv)
-        // .physical_address(CEC_INVALID_PHYSICAL_ADDRESS.try_into().unwrap())
-        // .physical_address(0x3000)
-        .hdmi_port(3)
+        .activate_source(adapter_config.activate_source)
+        .base_device(adapter_config.base_device)
+        .physical_address(adapter_config.physical_address)
+        .hdmi_port(adapter_config.hdmi_port)
         .command_received_callback(Box::new(on_command_received))
         .log_message_callback(Box::new(on_log_message))
-        // Only RecordingDevice types get remote button passthrough
-        .device_types(CecDeviceTypeVec(my_devices))
+        .device_types(cec_rs::CecDeviceTypeVec(adapter_config.device_types))
         .build()
         .unwrap();
     // Setup signal handling flags
@@ -367,7 +384,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                     } else {
-                        info!("<b><yellow>Playbackdevice1</> was not active source... skipping");
+                        info!(
+                            "<b><yellow>{:?}</> was not active source... skipping",
+                            get_primary_address(connection)
+                        );
                     }
                     info!(
                         "<i>connection.get_logical_addresses()</i> = {:?}",
