@@ -5,6 +5,9 @@ After=local-fs.target
 BindsTo=%i.device
 
 [Service]
+Type=notify
+NotifyAccess=main
+TimeoutStopSec=20
 Restart=always
 ExecStart=/usr/bin/cec-dpms --input %f
 
